@@ -97,7 +97,7 @@
 
 /* HACK: fixed-sized input buffer (read in chunks on a loop) */
 #ifndef BUF_SIZE
-# define BUF_SIZE 4096
+# define BUF_SIZE 65535
 #endif /* BUF_SIZE */
 
 #define POMD4C_DEBUG 1
