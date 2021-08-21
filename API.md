@@ -89,6 +89,18 @@ Log a plain string message and `exit(1)`
 ```
 
 
+Version number as hex (most to least significant):
+
+- major version
+- minor version
+- patch level
+- release annotation
+
+```C
+#define POMD4C_VERSION 0x00010000
+```
+
+
 ## Types
 
 

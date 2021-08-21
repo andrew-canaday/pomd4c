@@ -122,6 +122,21 @@
 /** Log a plain string message and `exit(1)` */
 #define ERROR_BAIL_MSG(msg) ERROR_BAIL("%s", msg)
 
+/** Version number as hex (most to least significant):
+ *
+ * - major version
+ * - minor version
+ * - patch level
+ * - release annotation
+ */
+#define POMD4C_VERSION 0x00010000
+
+#define POMD4C_MAJOR   ((POMD4C_VERSION >> 24) & 0xff)
+#define POMD4C_MINOR   ((POMD4C_VERSION >> 16) & 0xff)
+#define POMD4C_PATCH   ((POMD4C_VERSION >> 8)  & 0xff)
+#define POMD4C_RELEASE (POMD4C_VERSION         & 0xff)
+
+
 /** ## Types
  */
 
