@@ -3,7 +3,7 @@
 `pomd4c` is a very simplistic doc generator for C projects.
 
 It's small (one file) and hacky (...).
-It's intended for things projects that are small and simple.
+It's intended for projects that are small and simple.
 It's licensed under the [MIT license](./COPYING).
 
 > :information_source: for a complete example, see the  [the API docs](./API.md), which are
