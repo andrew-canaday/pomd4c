@@ -28,7 +28,7 @@ gcc ./pomd4c.c -o ./pomd4c \
 ### Input C:
 
 ```C
-/** ### this is a doc comment!
+/** #### this is a doc comment
  *
  * Anything in here is emitted verbatim.
  * For example, here's a list:
@@ -50,9 +50,9 @@ gcc ./pomd4c.c -o ./pomd4c \
 int my_func(uint32_t flags, const char* msg);
 ```
 
-#### Output markdown:
+### Output markdown:
 
-### this is a doc comment!
+#### this is a doc comment
 
 Anything in here is emitted verbatim.
 For example, here's a list:
