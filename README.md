@@ -1,7 +1,10 @@
 # pomd4c
 
 `pomd4c` is a very simplistic doc generator for C projects.
-It's small and hacky. It's licensed under the [MIT license](./COPYING).
+
+It's small and hacky.
+It's intended for things projects that are small and simple.
+It's licensed under the [MIT license](./COPYING).
 
 > :information_source: for build information/mechanics/examples, see
 > [the API docs](./API.md).
@@ -20,40 +23,55 @@ gcc ./pomd4c.c -o ./pomd4c \
     && ./pomd4c ./pomd4c.c > ./API.md
 ```
 
-## Syntax
+## Example
 
-#### Input like this:
+### Input C:
 
 ```C
-/* A comment with one '*' is ignored. */
-
-/** A comment with two '*' is a doc comment. */
-
-/** A comment with two '*' followed by a C def documents that def, e.g.: */
-static int my_int = 53;
+/** ### this is a doc comment!
+ *
+ * Anything in here is emitted verbatim.
+ * For example, here's a list:
+ *
+ *  - regular ol'
+ *  - markdown list
+ *
+ * ##### Example
+ *
+ * ```C
+ * puts("Including nested code fences!");
+ * ```
+ *
+ * > :warning: **NOTE**: _This message is important!_
+ *
+ * Anything that immediately follows a doc comment is
+ * wrapped in C code fences, like so:
+ */
+int my_func(uint32_t flags, const char* msg);
 ```
 
-#### Produces output like this:
+#### Output markdown:
 
-<pre>
-A comment with two '*' is a doc comment.
+### this is a doc comment!
 
+Anything in here is emitted verbatim.
+For example, here's a list:
 
-A comment with two '*' followed by a C def documents that def, e.g.:
+ - regular ol'
+ - markdown list
+
+##### Example
 
 ```C
-static int my_int = 53;
+puts("Including nested code fences!");
 ```
-</pre>
 
-#### Which looks like this:
+> :warning: **NOTE**: _This message is important!_
 
-A comment with two '*' is a doc comment.
-
-
-A comment with two '*' followed by a C def documents that def, e.g.:
+Anything that immediately follows a doc comment is
+wrapped in C code fences, like so:
 
 ```C
-static int my_int = 53;
+int my_func(uint32_t flags, const char* msg);
 ```
 
