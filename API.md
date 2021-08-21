@@ -6,7 +6,7 @@
 
  ```bash
  gcc ./pomd4c.c -o ./pomd4c \
-     && ./pomd4c ./pomd4c.c > ./README.md
+     && ./pomd4c ./pomd4c.c > ./API.md
  ```
 
  ## Mechanics
