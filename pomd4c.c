@@ -58,7 +58,7 @@
  *
  * Afterwards, it spits them back out with the C defs wrapped in markdown
  * code fences and the comments emitted verbatim, save for:
- *  - the leading `'/'`, `'*'`, `'*'` sequence on the first line
+ *  - the leading `'/'`, `'*'`, `'*'`, `' '` sequence on the first line
  *  - the first **3** columns of any subsequent lines
  *  - the trailing `'*'`, `'/'`, `'\n'` sequence
  *
@@ -80,7 +80,7 @@
  * If there are characters in the sequence `"{}()"`, it factors in nesting
  * levels in the most simplistic way possible.
  *
- * _**ENDUT HOCH HECH!** Donezo! Full stop. ¡Nada mas!_
+ * That's it!
  *
  * ---
  */
@@ -90,14 +90,31 @@
 /** ## Definitions
  */
 
-/* HACK: fixed-sized input buffer (read in chunks on a loop) */
-#define BUF_SIZE 4096
+/* Number of columns to skip when mid-comment: */
+#ifndef SKIP_COLS
+# define SKIP_COLS 3
+#endif /* SKIP_COLS */
 
+/* HACK: fixed-sized input buffer (read in chunks on a loop) */
+#ifndef BUF_SIZE
+# define BUF_SIZE 4096
+#endif /* BUF_SIZE */
+
+#define POMD4C_DEBUG 1
+#if defined(POMD4C_DEBUG) && (POMD4C_DEBUG == 1)
 /** Simple debug logging function */
+# define LOG_DEBUG(fmt, ...) \
+    fprintf(stderr, "DEBUG: "fmt"\n", __VA_ARGS__)
+#else
+# define LOG_DEBUG(...)
+#endif /* POMD4C_DEBUG */
+
+/** Simple error logging function */
 #define LOG_ERROR(fmt, ...) \
     fprintf(stderr, "ERROR: "fmt"\n", __VA_ARGS__)
 
-/** Log a formatted string message and `exit(1)` */
+/** Log a formatted string message and `exit(1)`
+ */
 #define ERROR_BAIL(fmt, ...) \
     LOG_ERROR(fmt, __VA_ARGS__); \
     exit(1)
@@ -116,13 +133,23 @@ typedef enum parser_state {
     PARSE_FILE,          /* Looking for doc comment start */
     PARSE_OPEN_SLASH,    /* Saw the initial '/', looking for '*' */
     PARSE_STAR,          /* Saw '*' after '/', looking for another */
-    PARSE_COMMENT_START, /* Comment def_pre parse begins (skips leading ' ') */
+    PARSE_SPACE,         /* Saw '*' after '*', looking for a space */
     PARSE_COMMENT,       /* Parsing comment def_pre (skips first 3 columns) */
     PARSE_NEWLINE,       /* Looking for newline after comment */
     PARSE_DEF_START,     /* Def parsing (optional) begins (skips leading ' ')*/
     PARSE_DEF            /* Parsing the actual C def, looking for a terminal */
 } parser_state_t;
 
+static const char* STATE_NAMES[] = {
+    "PARSE_FILE",
+    "PARSE_OPEN_SLASH",
+    "PARSE_STAR",
+    "PARSE_SPACE",
+    "PARSE_COMMENT",
+    "PARSE_NEWLINE",
+    "PARSE_DEF_START",
+    "PARSE_DEF"
+};
 
 /** ### parse_info_t
  *
@@ -164,9 +191,22 @@ static void parser_reset(parse_info_t* parser);
 
 /** ### parser_write
  *
- * Write a single character to the parser's output buffer.
+ * Unconditionally write a single character to the parser's output buffer.
+ *
+ *  - `parser` a pointer to the current `parse_info_t`
+ *  - `c` the character to write to the buffer
  */
 static void parser_write(parse_info_t* parser, char c);
+
+/** ### parser_write_comment
+ *
+ * Write a single character to the parser's output buffer IF the character is
+ * a newline or the current column is greater than SKIP_COLS.
+ *
+ *  - `parser` a pointer to the current `parse_info_t`
+ *  - `c` the character to write to the buffer
+ */
+static int parser_write_comment(parse_info_t* parser, char c);
 
 /** ### parser_emit
  *
@@ -176,7 +216,7 @@ static void parser_emit(parse_info_t* parser);
 
 /** ### parse_comment
  *
- * Invoked by `parse` to parse a comment def_pre.
+ * Invoked by `parse` to parse a comment def_post.
  */
 static void parse_comment(parse_info_t* parser, char c);
 
@@ -208,7 +248,7 @@ static void parser_reset(parse_info_t* parser)
     parser->recv = parser->buffer;
     parser->state = PARSE_FILE;
     parser->row = 1;
-    parser->col = 1;
+    parser->col = 0;
     return;
 }
 
@@ -221,16 +261,37 @@ static void parser_write(parse_info_t* parser, char c)
 }
 
 
+static int parser_write_comment(parse_info_t* parser, char c)
+{
+    if( c == '\n' || parser->col > SKIP_COLS ) {
+        parser_write(parser, c);
+        return 1;
+    }
+    return 0;
+}
+
 static void parser_emit(parse_info_t* parser)
 {
+    /* Heading (optional) */
+    if( parser->heading ) {
+        printf("\n%s\n", parser->heading);
+    }
+
+    /* Summary: the only thing, if there's anything at all. */
     printf("%s\n", parser->summary);
 
+    if( parser->def_pre ) {
+        printf("\n%s\n", parser->def_pre);
+    }
+
+    /* Def: the C definition/declaration (optional) */
     if( parser->def ) {
         printf("\n```C\n%s\n```\n", parser->def);
     }
 
-    if( parser->def_pre ) {
-        printf("\n%s\n", parser->def_pre);
+    /* The post-def comment body (optional) */
+    if( parser->def_post ) {
+        printf("\n%s\n", parser->def_post);
     }
 
     puts("\n");
@@ -240,32 +301,17 @@ static void parser_emit(parse_info_t* parser)
 
 static void parse_comment(parse_info_t* parser, char c)
 {
-#define COMMENT_SPLITTING_BROKEN 1
-   if( c == '\n' ) {
-       if( !COMMENT_SPLITTING_BROKEN ) {
-           if( parser->row == 2 ) {
-               parser_write(parser, '\0');  /* End the first line */
-               parser->def_pre = parser->recv; /* Start the def_pre */
-               parser_write(parser, '\n');  /* Add some newlines... */
-               parser_write(parser, '\n');  /* for good measure. */
-           }
-       }
-   }
-
-   /* Check for end-of-comment: */
-   if( c == '/' && parser->last_seen == '*' ) {
-       /* Delete that last '*' and write string terminal: */
-       parser->recv--;
-       parser_write(parser, '\0');
-       parser->def = parser->recv;
-       parser->state++;
-   } else if( c == '\n' || parser->col > 3 ) {
-       /* Otherwise, write the char if it's a newline or not the beginning
-        * of a comment line (col > 3):
-        */
-       parser_write(parser, c);
-   }
-   return;
+    /* Check for end-of-comment: */
+    if( c == '/' && parser->last_seen == '*' ) {
+        /* Delete that last '*' and write string terminal: */
+        parser->recv--;
+        parser_write(parser, '\0');
+        parser->def = parser->recv;
+        parser->state++;
+    } else {
+        parser_write_comment(parser, c);
+    }
+    return;
 }
 
 
@@ -305,7 +351,7 @@ static void parse_def_start(parse_info_t* parser, char c)
         /* Else, ignore leading spaces. */
         case ' ':
             return;
-        /* Okay! We've got something substantive; start parsing the comment. */
+        /* Okay! We've got something substantive; start parsing the def. */
         default:
             parser_write(parser, c);
             parser->state++;
@@ -346,18 +392,13 @@ static void parse_def(parse_info_t* parser, char c)
     /* If this is the apparent end of the C def.... */
     if( c == parser->terminal ) {
         switch( parser->terminal ) {
-            case '\n':
-                /* It's not a terminal newline if it's preceeded by '/': */
-                if( parser->last_seen == '\\' ) {
-                    return;
-                }
-                break;
-
             /* If the terminal is either of our "nesting characters", make
              * note of it, decrement the nesting count, and swap back to
              * whatever the previous terminal was — i.e. '\n' for a macro and
              * ';' otherwise.
              */
+            case '\n':
+                break;
             case '}':
                 /* fallthrough */
             case ')':
@@ -402,7 +443,7 @@ static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
 
         if( c == '\n' ) {
             parser->row++;
-            parser->col = 1;
+            parser->col = 0;
         } else {
             parser->col++;
         }
@@ -430,12 +471,13 @@ static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
                     parser_reset(parser);
                 }
                 break;
-            case PARSE_COMMENT_START:
-                /* Skip whitespace and everything in the first three columns */
-                if( c != ' ' || parser->col > 3 ) {
-                    parser->summary = parser->recv;
-                    parser_write(parser, c);
+            case PARSE_SPACE:
+                /* We got a second '*', so expect ' '; else: reset! */
+                if( c == ' ' ) {
                     parser->state++;
+                    parser->summary = parser->recv;
+                } else {
+                    parser_reset(parser);
                 }
                 break;
             case PARSE_COMMENT:
