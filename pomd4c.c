@@ -97,7 +97,7 @@
 
 /* HACK: fixed-sized input buffer (read in chunks on a loop) */
 #ifndef BUF_SIZE
-# define BUF_SIZE 65535
+# define BUF_SIZE 8192
 #endif /* BUF_SIZE */
 
 #define POMD4C_DEBUG 1
@@ -136,6 +136,7 @@
 #define POMD4C_PATCH   ((POMD4C_VERSION >> 8)  & 0xff)
 #define POMD4C_RELEASE (POMD4C_VERSION         & 0xff)
 
+static size_t line = 0;
 
 /** ## Types
  */
@@ -422,10 +423,11 @@ static void parse_def(parse_info_t* parser, char c)
                 if( parser->nest_lvl == 0 ) {
                     if( !parser->is_macro ) {
                         parser->terminal = ';';
-                        return;
-                    }
+                    } else {
+                        break;
+                    };
                 }
-                break;
+                return;
             case ';':
                 /* Okay, this means we're done with a non-macro def: */
                 parser_write(parser, c);
@@ -454,9 +456,11 @@ static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
             parser->last_seen = *(src-1);
         }
 
+
         char c = *src++;
 
         if( c == '\n' ) {
+            line++;
             parser->row++;
             parser->col = 0;
         } else {
