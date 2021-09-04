@@ -41,11 +41,7 @@ code fences and the comments emitted verbatim, save for:
    (i.e. a comment end)
 1. Afterwards, it reads whatever follows like so:
     - If the next thing that happens is `'\n'` the comment stands on its own.
-    - Otherwise, it'll read until it reaches a "terminal."
-
-Terminals are defined like so:
- - If the thing being documented starts with `'#'`, the terminal is `'\n'`.
- - Otherwise, the terminal is `';'`.
+    - Otherwise, it'll read until it reaches the end of the current def.
 
 If there are characters in the sequence `"{}()"`, it factors in nesting
 levels in the most simplistic way possible.
