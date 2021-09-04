@@ -106,7 +106,7 @@ Version number as hex (most to least significant):
 - release annotation
 
 ```C
-#define POMD4C_VERSION 0x00010000
+#define POMD4C_VERSION 0x00020000
 ```
 
 

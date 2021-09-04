@@ -136,7 +136,7 @@
  * - patch level
  * - release annotation
  */
-#define POMD4C_VERSION 0x00010000
+#define POMD4C_VERSION 0x00020000
 
 #define POMD4C_MAJOR   ((POMD4C_VERSION >> 24) & 0xff)
 #define POMD4C_MINOR   ((POMD4C_VERSION >> 16) & 0xff)
