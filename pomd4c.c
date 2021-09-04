@@ -42,7 +42,7 @@
  *
  * ## Mechanics
  *
- * `pomd4c` is *very* simple — *it is not a C parser or proper document
+ * `pomd4c` is a little hack — *it is not a C parser or proper document
  * generator*.
  *
  * ### This is all that it does:
@@ -59,6 +59,7 @@
  *
  * Afterwards, it spits them back out with the C defs wrapped in markdown
  * code fences and the comments emitted verbatim, save for:
+ *
  *  - the leading `'/'`, `'*'`, `'*'`, `' '` sequence on the first line
  *  - the first **3** columns of any subsequent lines
  *  - the trailing `'*'`, `'/'`, `'\n'` sequence
@@ -66,7 +67,7 @@
  *
  * ### This is how it works:
  *
- * 1. It looks for the character sequence `'/'`, `'*'`, `'*'`.
+ * 1. It looks for the character sequence `'/'`, `'*'`, `'*'`, ' '.
  *    (i.e. a doc comment start)
  * 1. Then it looks for the sequence `'*'`, `'/'`, `'\n'`.
  *    (i.e. a comment end)
@@ -159,7 +160,7 @@ typedef enum parser_state {
     PARSE_COMMENT,       /* Parsing comment def_pre (skips first 3 columns) */
     PARSE_NEWLINE,       /* Looking for newline after comment */
     PARSE_DEF_START,     /* Def parsing (optional) begins (skips leading ' ')*/
-    PARSE_DEF,           /* Parsing the actual C def, looking for a terminal */
+    PARSE_DEF,           /* Parsing the actual C def, looking for a LF */
     PARSE_DEF_END        /* End of def parsing */
 } parser_state_t;
 
@@ -364,7 +365,6 @@ static void parse_def_start(parse_info_t* parser, char c)
         /* Okay! We've got something substantive; start parsing the def. */
         case '#':
             parser->is_macro = 1;
-            parser->terminal = '\n';
             /* fallthrough */
         default:
             parser_write(parser, c);
@@ -396,12 +396,13 @@ static void parse_def(parse_info_t* parser, char c)
             break;
     }
 
-    if( c == parser->terminal
+    if( c == '\n'
 #ifdef POMD4C_BACKSLASH_ESCAPES
             && parser->last_saved != '\\'
 #endif /* POMD4C_BACKSLASH_ESCAPES */
             && parser->nest_lvl == 0 ) {
         parser->state = PARSE_DEF_END;
+        return;
     }
 
     /* Whatever it is, write it down: */
@@ -424,7 +425,6 @@ static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
         LOG_TRACE("%04zu,%04zu:%s: '%c' (term: '%c'; seen: %c'; saved: '%c')",
             parser->row, parser->col,
             STATE_NAMES[parser->state], c,
-            parser->terminal,
             parser->last_seen,
             parser->last_saved
             );
@@ -477,7 +477,6 @@ static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
                  * markdown to emit on its own: */
                 if( c == '\n' ) {
                     parser->state++;
-                    parser->terminal = '\n';
                 } else {
                     /* Otherwise, start parsing the def text: */
                     parser->def = NULL;
@@ -492,10 +491,10 @@ static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
 still_in_def:
                 parse_def(parser, c);
                 break;
+            /* HACK HACK HACK */
             case PARSE_DEF_END:
                 if( c == '\n' || c == '#' ) {
                     if( parser->is_macro || parser->last_seen == '\n' ) {
-                        parser->recv--;
                         parser_write(parser, '\0');
                         parser_emit(parser);
                         parser_reset(parser);
@@ -503,6 +502,7 @@ still_in_def:
                         parser_write(parser, c);
                     }
                 } else {
+                    parser_write(parser, '\n'); /* write the LF we skipped */
                     parser->state = PARSE_DEF;
                     goto still_in_def;
                 }

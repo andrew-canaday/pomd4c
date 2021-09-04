@@ -11,7 +11,7 @@ gcc ./pomd4c.c -o ./pomd4c \
 
 ## Mechanics
 
-`pomd4c` is *very* simple — *it is not a C parser or proper document
+`pomd4c` is a little hack — *it is not a C parser or proper document
 generator*.
 
 ### This is all that it does:
@@ -28,6 +28,7 @@ definitions/declarations immediately following comments.
 
 Afterwards, it spits them back out with the C defs wrapped in markdown
 code fences and the comments emitted verbatim, save for:
+
  - the leading `'/'`, `'*'`, `'*'`, `' '` sequence on the first line
  - the first **3** columns of any subsequent lines
  - the trailing `'*'`, `'/'`, `'\n'` sequence
@@ -35,7 +36,7 @@ code fences and the comments emitted verbatim, save for:
 
 ### This is how it works:
 
-1. It looks for the character sequence `'/'`, `'*'`, `'*'`.
+1. It looks for the character sequence `'/'`, `'*'`, `'*'`, ' '.
    (i.e. a doc comment start)
 1. Then it looks for the sequence `'*'`, `'/'`, `'\n'`.
    (i.e. a comment end)
@@ -125,7 +126,7 @@ typedef enum parser_state {
     PARSE_COMMENT,       /* Parsing comment def_pre (skips first 3 columns) */
     PARSE_NEWLINE,       /* Looking for newline after comment */
     PARSE_DEF_START,     /* Def parsing (optional) begins (skips leading ' ')*/
-    PARSE_DEF,           /* Parsing the actual C def, looking for a terminal */
+    PARSE_DEF,           /* Parsing the actual C def, looking for a LF */
     PARSE_DEF_END        /* End of def parsing */
 } parser_state_t;
 ```
