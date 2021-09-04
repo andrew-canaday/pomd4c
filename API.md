@@ -64,28 +64,46 @@ That's it!
 Simple debug logging function 
 
 ```C
-# define LOG_DEBUG(fmt, ...)
+# define LOG_TRACE(fmt, ...) \
+    fprintf(stderr, "TRACE: "fmt"\n", __VA_ARGS__)
+#else
+# define LOG_TRACE(...)
+#endif /* POMD4C_TRACE */
+```
+
+
+Simple debug logging function 
+
+```C
+# define LOG_DEBUG(fmt, ...) \
+    fprintf(stderr, "DEBUG: "fmt"\n", __VA_ARGS__)
+#else
+# define LOG_DEBUG(...)
+#endif /* POMD4C_DEBUG */
 ```
 
 
 Simple error logging function 
 
 ```C
-#define LOG_ERROR(fmt, ...)
+#define LOG_ERROR(fmt, ...) \
+    fprintf(stderr, "ERROR: "fmt"\n", __VA_ARGS__)
 ```
 
 
 Log a formatted string message and `exit(1)`
 
 ```C
-#define ERROR_BAIL(fmt, ...)
+#define ERROR_BAIL(fmt, ...) \
+    LOG_ERROR(fmt, __VA_ARGS__); \
+    exit(1)
 ```
 
 
 Log a plain string message and `exit(1)` 
 
 ```C
-#define ERROR_BAIL_MSG(msg)
+#define ERROR_BAIL_MSG(msg) ERROR_BAIL("%s", msg)
 ```
 
 
@@ -117,7 +135,8 @@ typedef enum parser_state {
     PARSE_COMMENT,       /* Parsing comment def_pre (skips first 3 columns) */
     PARSE_NEWLINE,       /* Looking for newline after comment */
     PARSE_DEF_START,     /* Def parsing (optional) begins (skips leading ' ')*/
-    PARSE_DEF            /* Parsing the actual C def, looking for a terminal */
+    PARSE_DEF,           /* Parsing the actual C def, looking for a terminal */
+    PARSE_DEF_END        /* End of def parsing */
 } parser_state_t;
 ```
 
@@ -141,13 +160,13 @@ typedef struct parse_info {
     const char*    def_pre;           /* Remainder of comment (optional) */
     const char*    def_post;          /* Post def content (optional) */
     const char*    def;               /* Beginning of C def (optional) */
+    size_t         len;               /* Number of bytes written to buffer. */
 
     /* parse state specifics: */
     char*          recv;              /* Current input pointer for buffer */
     char           terminal;          /* PARSE_DEF terminal we're looking for */
     char           last_saved;        /* Last char actually stored in buffer */
     char           last_seen;         /* Last char actually seen in file */
-    char           nest_char;         /* Char used to increase nest level */
     int            is_macro;          /* Flag indicating macro def vs other */
 } parse_info_t;
 ```

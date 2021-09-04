@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #include <sys/errno.h>
 
@@ -100,7 +101,16 @@
 # define BUF_SIZE 8192
 #endif /* BUF_SIZE */
 
-#define POMD4C_DEBUG 1
+#define POMD4C_TRACE 0
+#if defined(POMD4C_TRACE) && (POMD4C_TRACE == 1)
+/** Simple debug logging function */
+# define LOG_TRACE(fmt, ...) \
+    fprintf(stderr, "TRACE: "fmt"\n", __VA_ARGS__)
+#else
+# define LOG_TRACE(...)
+#endif /* POMD4C_TRACE */
+
+#define POMD4C_DEBUG 0
 #if defined(POMD4C_DEBUG) && (POMD4C_DEBUG == 1)
 /** Simple debug logging function */
 # define LOG_DEBUG(fmt, ...) \
@@ -153,8 +163,10 @@ typedef enum parser_state {
     PARSE_COMMENT,       /* Parsing comment def_pre (skips first 3 columns) */
     PARSE_NEWLINE,       /* Looking for newline after comment */
     PARSE_DEF_START,     /* Def parsing (optional) begins (skips leading ' ')*/
-    PARSE_DEF            /* Parsing the actual C def, looking for a terminal */
+    PARSE_DEF,           /* Parsing the actual C def, looking for a terminal */
+    PARSE_DEF_END        /* End of def parsing */
 } parser_state_t;
+
 
 static const char* STATE_NAMES[] = {
     "PARSE_FILE",
@@ -164,7 +176,8 @@ static const char* STATE_NAMES[] = {
     "PARSE_COMMENT",
     "PARSE_NEWLINE",
     "PARSE_DEF_START",
-    "PARSE_DEF"
+    "PARSE_DEF",
+    "PARSE_DEF_END"
 };
 
 /** ### parse_info_t
@@ -185,13 +198,13 @@ typedef struct parse_info {
     const char*    def_pre;           /* Remainder of comment (optional) */
     const char*    def_post;          /* Post def content (optional) */
     const char*    def;               /* Beginning of C def (optional) */
+    size_t         len;               /* Number of bytes written to buffer. */
 
     /* parse state specifics: */
     char*          recv;              /* Current input pointer for buffer */
     char           terminal;          /* PARSE_DEF terminal we're looking for */
     char           last_saved;        /* Last char actually stored in buffer */
     char           last_seen;         /* Last char actually seen in file */
-    char           nest_char;         /* Char used to increase nest level */
     int            is_macro;          /* Flag indicating macro def vs other */
 } parse_info_t;
 
@@ -262,17 +275,22 @@ static void parser_reset(parse_info_t* parser)
 {
     memset(parser, 0, sizeof(parse_info_t));
     parser->recv = parser->buffer;
-    parser->state = PARSE_FILE;
     parser->row = 1;
-    parser->col = 0;
     return;
 }
 
 
 static void parser_write(parse_info_t* parser, char c)
 {
+#ifdef POMD4C_CHECK_PRINTABLE
+    if( c != '\0' && !isprint(c) ) {
+        return;
+    }
+#endif /* POMD4C_CHECK_PRINTABLE */
+
     *(parser->recv++) = c;
     parser->last_saved = c;
+    parser->len++;
     return;
 }
 
@@ -288,6 +306,8 @@ static int parser_write_comment(parse_info_t* parser, char c)
 
 static void parser_emit(parse_info_t* parser)
 {
+    parser->buffer[BUF_SIZE-1] = '\0'; /* HACK HACK HACK */
+
     /* Heading (optional) */
     if( parser->heading ) {
         printf("\n%s\n", parser->heading);
@@ -333,41 +353,23 @@ static void parse_comment(parse_info_t* parser, char c)
 
 static void parse_def_start(parse_info_t* parser, char c)
 {
-    /* If no terminal is set, we haven't seen a char we care too much about
-     * so...
-     */
-    if( parser->terminal == '\0' ) {
-        switch(c) {
-            /* 1. Skip most whitespace */
-            case ' ':
-                /* fallthrough */
-            case '\t':
-                /* fallthrough */
-            case '\r':
-                return;
-            /* If the character is '#', assume a macro: */
-            case '#':
-                parser->terminal = '\n';
-                parser->is_macro = 1;
-                break;
-            /* Otherwise, we got something else; look for a ';': */
-            default:
-                parser->terminal = ';';
-        }
-    }
-
-    /* Otherwise... */
     switch(c) {
         /* If we hit a newline before anything else: give up on defs + emit. */
         case '\n':
             parser->def = NULL;
             parser_emit(parser);
             parser_reset(parser);
-            return;
+            break;
         /* Else, ignore leading spaces. */
         case ' ':
-            return;
+            /* fallthrough */
+        case '\t':
+            break;
         /* Okay! We've got something substantive; start parsing the def. */
+        case '#':
+            parser->is_macro = 1;
+            parser->terminal = '\n';
+            /* fallthrough */
         default:
             parser_write(parser, c);
             parser->state++;
@@ -383,65 +385,31 @@ static void parse_def(parse_info_t* parser, char c)
      * we're using to check for nesting, check to see if the present
      * character is in "({" and set things up to track nesting. Else, move on.
      */
-    if( parser->nest_lvl == 0 ) {
-        switch(c) {
-            case '(':
-                parser->nest_char = '(';
-                parser->terminal = ')';
-                break;
-            case '{':
-                parser->nest_char = '{';
-                parser->terminal = '}';
-                break;
-            default:
-                break;
-        }
+    switch(c) {
+        case '(':
+            /* fallthrough */
+        case '{':
+            parser->nest_lvl++;
+            break;
+        case ')':
+            /* fallthrough */
+        case '}':
+            parser->nest_lvl--;
+            break;
+        default:
+            break;
     }
 
-    /* If we *are* nested and this is the top-level nesting char, go ahead and
-     * increment the nesting level.
-     */
-    if( c == parser->nest_char ) {
-        parser->nest_lvl++;
+    if( c == parser->terminal
+#ifdef POMD4C_BACKSLASH_ESCAPES
+            && parser->last_saved != '\\'
+#endif /* POMD4C_BACKSLASH_ESCAPES */
+            && parser->nest_lvl == 0 ) {
+        parser->state = PARSE_DEF_END;
     }
 
-    /* If this is the apparent end of the C def.... */
-    if( c == parser->terminal ) {
-        switch( parser->terminal ) {
-            /* If the terminal is either of our "nesting characters", make
-             * note of it, decrement the nesting count, and swap back to
-             * whatever the previous terminal was — i.e. '\n' for a macro and
-             * ';' otherwise.
-             */
-            case '\n':
-                break;
-            case '}':
-                /* fallthrough */
-            case ')':
-                parser->nest_lvl--;
-                parser_write(parser, c); /* Whatever it is, write it. */
-                if( parser->nest_lvl == 0 ) {
-                    if( !parser->is_macro ) {
-                        parser->terminal = ';';
-                    } else {
-                        break;
-                    };
-                }
-                return;
-            case ';':
-                /* Okay, this means we're done with a non-macro def: */
-                parser_write(parser, c);
-                break;
-            default:
-                break;
-        }
-
-        parser_write(parser, '\0');
-        parser_emit(parser);
-        parser_reset(parser);
-    } else {
-        parser_write(parser, c);
-    }
+    /* Whatever it is, write it down: */
+    parser_write(parser, c);
     return;
 }
 
@@ -456,8 +424,14 @@ static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
             parser->last_seen = *(src-1);
         }
 
-
         char c = *src++;
+        LOG_TRACE("%04zu,%04zu:%s: '%c' (term: '%c'; seen: %c'; saved: '%c')",
+            parser->row, parser->col,
+            STATE_NAMES[parser->state], c,
+            parser->terminal,
+            parser->last_seen,
+            parser->last_saved
+            );
 
         if( c == '\n' ) {
             line++;
@@ -507,6 +481,7 @@ static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
                  * markdown to emit on its own: */
                 if( c == '\n' ) {
                     parser->state++;
+                    parser->terminal = '\n';
                 } else {
                     /* Otherwise, start parsing the def text: */
                     parser->def = NULL;
@@ -518,7 +493,23 @@ static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
                 parse_def_start(parser, c);
                 break;
             case PARSE_DEF:
+still_in_def:
                 parse_def(parser, c);
+                break;
+            case PARSE_DEF_END:
+                if( c == '\n' ) {
+                    if( parser->is_macro || parser->last_seen == '\n' ) {
+                        parser->recv--;
+                        parser_write(parser, '\0');
+                        parser_emit(parser);
+                        parser_reset(parser);
+                    } else {
+                        parser_write(parser, c);
+                    }
+                } else {
+                    parser->state = PARSE_DEF;
+                    goto still_in_def;
+                }
                 break;
         }
     }
