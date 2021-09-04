@@ -62,9 +62,6 @@ Simple debug logging function
 ```C
 # define LOG_TRACE(fmt, ...) \
     fprintf(stderr, "TRACE: "fmt"\n", __VA_ARGS__)
-#else
-# define LOG_TRACE(...)
-#endif /* POMD4C_TRACE */
 ```
 
 
@@ -73,9 +70,6 @@ Simple debug logging function
 ```C
 # define LOG_DEBUG(fmt, ...) \
     fprintf(stderr, "DEBUG: "fmt"\n", __VA_ARGS__)
-#else
-# define LOG_DEBUG(...)
-#endif /* POMD4C_DEBUG */
 ```
 
 

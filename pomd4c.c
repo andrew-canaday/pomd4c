@@ -493,7 +493,7 @@ still_in_def:
                 parse_def(parser, c);
                 break;
             case PARSE_DEF_END:
-                if( c == '\n' ) {
+                if( c == '\n' || c == '#' ) {
                     if( parser->is_macro || parser->last_seen == '\n' ) {
                         parser->recv--;
                         parser_write(parser, '\0');
