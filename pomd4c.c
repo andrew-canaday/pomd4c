@@ -73,7 +73,7 @@
  *    (i.e. a comment end)
  * 1. Afterwards, it reads whatever follows like so:
  *     - If the next thing that happens is `'\n'` the comment stands on its own.
- *     - Otherwise, it'll read until it reaches the end of the current def.
+ *     - Otherwise, it'll read until it reaches the end of the current def/decl.
  *
  * If there are characters in the sequence `"{}()"`, it factors in nesting
  * levels in the most simplistic way possible.
@@ -199,7 +199,6 @@ typedef struct parse_info {
 
     /* parse state specifics: */
     char*          recv;              /* Current input pointer for buffer */
-    char           terminal;          /* PARSE_DEF terminal we're looking for */
     char           last_saved;        /* Last char actually stored in buffer */
     char           last_seen;         /* Last char actually seen in file */
     int            is_macro;          /* Flag indicating macro def vs other */
@@ -242,7 +241,7 @@ static void parser_emit(parse_info_t* parser);
 
 /** ### parse_comment
  *
- * Invoked by `parse` to parse a comment def_post.
+ * Invoked by `parse` to parse a comment body.
  */
 static void parse_comment(parse_info_t* parser, char c);
 
@@ -254,7 +253,7 @@ static void parse_def_start(parse_info_t* parser, char c);
 
 /** ### parse_def
  *
- * Invoked by `parse` to parse a C def.
+ * Invoked by `parse` to parse a C definition/declaration.
  */
 static void parse_def(parse_info_t* parser, char c);
 
