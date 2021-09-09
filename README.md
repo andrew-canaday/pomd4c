@@ -28,53 +28,71 @@ gcc ./pomd4c.c -o ./pomd4c \
 
 ## Example
 
-### Input C:
+### input.c
 
 ```C
-/** #### this is a doc comment
+/** #### Doc Comment Header!
  *
- * Anything in here is emitted verbatim.
+ * Doc comments start with `'/'`, `'*'`, `'*'`.
+ *
+ * Anything inside is emitted verbatim.
  * For example, here's a list:
  *
  *  - regular ol'
  *  - markdown list
  *
- * ##### Example
+ * ##### Code Snippets
  *
  * ```C
  * puts("Including nested code fences!");
  * ```
  *
+ * ##### Block Quotes
+ *
  * > :warning: **NOTE**: _This message is important!_
  *
- * Anything that immediately follows a doc comment is
+ * ----
+ *
+ * You get the idea.
+ *
+ * Anything that _immediately follows_ a doc comment is
  * wrapped in C code fences, like so:
  */
 int my_func(uint32_t flags, const char* msg);
+
 ```
 
-### Output markdown:
+### output.md
 
-#### this is a doc comment
+#### Doc Comment Header!
 
-Anything in here is emitted verbatim.
+Doc comments start with `'/'`, `'*'`, `'*'`.
+
+Anything inside is emitted verbatim.
 For example, here's a list:
 
  - regular ol'
  - markdown list
 
-##### Example
+##### Code Snippets
 
 ```C
 puts("Including nested code fences!");
 ```
 
+##### Block Quotes
+
 > :warning: **NOTE**: _This message is important!_
 
-Anything that immediately follows a doc comment is
+----
+
+You get the idea.
+
+Anything that _immediately follows_ a doc comment is
 wrapped in C code fences, like so:
 
 ```C
 int my_func(uint32_t flags, const char* msg);
 ```
+
 
