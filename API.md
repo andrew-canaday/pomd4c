@@ -29,14 +29,14 @@ definitions/declarations immediately following comments.
 Afterwards, it spits them back out with the C defs wrapped in markdown
 code fences and the comments emitted verbatim, save for:
 
- - the leading `'/'`, `'*'`, `'*'`, `' '` sequence on the first line
+ - the leading `'/'`, `'*'`, `'*'`, sequence on the first line
  - the first **3** columns of any subsequent lines
  - the trailing `'*'`, `'/'`, `'\n'` sequence
 
 
 ### This is how it works:
 
-1. It looks for the character sequence `'/'`, `'*'`, `'*'`, ' '.
+1. It looks for the character sequence `'/'`, `'*'`, `'*'`.
    (i.e. a doc comment start)
 1. Then it looks for the sequence `'*'`, `'/'`, `'\n'`.
    (i.e. a comment end)
@@ -50,39 +50,56 @@ levels in the most simplistic way possible.
 That's it!
 
 ---
-
-
 # API 
-
-
 ## Definitions
-
-
-Simple debug logging function 
+Standard output, if -v: 
 
 ```C
-# define LOG_TRACE(fmt, ...) \
-    fprintf(stderr, "TRACE: "fmt"\n", __VA_ARGS__)
+#define LOG_INFO(fmt, ...) \
+    do { \
+        if( verbose > 0 ) { \
+            fprintf(stderr, "pomd4c "POMD4C_VERSION": "fmt"\n", __VA_ARGS__); \
+        } \
+    } while(0)
 ```
 
-
-Simple debug logging function 
+Debug output, if -vv: 
 
 ```C
-# define LOG_DEBUG(fmt, ...) \
-    fprintf(stderr, "DEBUG: "fmt"\n", __VA_ARGS__)
+#define LOG_DEBUG(fmt, ...) \
+    do { \
+        if( verbose > 1 ) { \
+            fprintf(stderr, "DEBUG: "fmt"\n", __VA_ARGS__); \
+        } \
+    } while(0)
 ```
 
+Trace output, if -vvv: 
 
-Simple error logging function 
+```C
+#define LOG_TRACE(fmt, ...) \
+    do { \
+        if( verbose > 2 ) { \
+            fprintf(stderr, "TRACE: "fmt"\n", __VA_ARGS__); \
+        } \
+    } while(0)
+```
+
+Simple warning log function 
+
+```C
+#define LOG_WARNING(fmt, ...) \
+    fprintf(stderr, "\033[00;34mWARNING: "fmt"\033[00;m\n", __VA_ARGS__)
+```
+
+Simple error log function 
 
 ```C
 #define LOG_ERROR(fmt, ...) \
-    fprintf(stderr, "ERROR: "fmt"\n", __VA_ARGS__)
+    fprintf(stderr, "\033[00;31mERROR: "fmt"\033[00;m\n", __VA_ARGS__)
 ```
 
-
-Log a formatted string message and `exit(1)`
+Log a formatted string message and `exit(1)`. 
 
 ```C
 #define ERROR_BAIL(fmt, ...) \
@@ -90,29 +107,19 @@ Log a formatted string message and `exit(1)`
     exit(1)
 ```
 
-
-Log a plain string message and `exit(1)` 
+Log a plain string message and `exit(1)`. 
 
 ```C
 #define ERROR_BAIL_MSG(msg) ERROR_BAIL("%s", msg)
 ```
 
-
-Version number as hex (most to least significant):
-
-- major version
-- minor version
-- patch level
-- release annotation
+Version number as a string literal. 
 
 ```C
-#define POMD4C_VERSION 0x00020000
+#ifndef POMD4C_VERSION
 ```
 
-
 ## Types
-
-
 ### parser_state_t
 
 Enum used to track the present state of the parser.
@@ -122,15 +129,14 @@ typedef enum parser_state {
     PARSE_FILE,          /* Looking for doc comment start */
     PARSE_OPEN_SLASH,    /* Saw the initial '/', looking for '*' */
     PARSE_STAR,          /* Saw '*' after '/', looking for another */
-    PARSE_SPACE,         /* Saw '*' after '*', looking for a space */
-    PARSE_COMMENT,       /* Parsing comment def_pre (skips first 3 columns) */
+    PARSE_SPACE,         /* Saw '*' after '*', skip leading spaces */
+    PARSE_COMMENT,       /* Parsing comment (skips first 3 columns) */
     PARSE_NEWLINE,       /* Looking for newline after comment */
     PARSE_DEF_START,     /* Def parsing (optional) begins (skips leading ' ')*/
     PARSE_DEF,           /* Parsing the actual C def, looking for a LF */
     PARSE_DEF_END        /* End of def parsing */
 } parser_state_t;
 ```
-
 
 ### parse_info_t
 
@@ -148,8 +154,6 @@ typedef struct parse_info {
     /* content pointers: */
     const char*    heading;           /* Heading, if present */
     const char*    summary;           /* First line of comment */
-    const char*    def_pre;           /* Remainder of comment (optional) */
-    const char*    def_post;          /* Post def content (optional) */
     const char*    def;               /* Beginning of C def (optional) */
     size_t         len;               /* Number of bytes written to buffer. */
 
@@ -161,9 +165,11 @@ typedef struct parse_info {
 } parse_info_t;
 ```
 
-
 ## Functions
 
+Prototypes for illustration purposes only.
+
+_**WARNING**: DO NOT EAT. DO NOT INCINERATE._
 
 ### parser_reset
 
@@ -172,7 +178,6 @@ Reset the parser to initial state.
 ```C
 static void parser_reset(parse_info_t* parser);
 ```
-
 
 ### parser_write
 
@@ -184,7 +189,6 @@ Unconditionally write a single character to the parser's output buffer.
 ```C
 static void parser_write(parse_info_t* parser, char c);
 ```
-
 
 ### parser_write_comment
 
@@ -198,7 +202,6 @@ a newline or the current column is greater than SKIP_COLS.
 static int parser_write_comment(parse_info_t* parser, char c);
 ```
 
-
 ### parser_emit
 
 Emit the parsers output buffer as markdown.
@@ -206,7 +209,6 @@ Emit the parsers output buffer as markdown.
 ```C
 static void parser_emit(parse_info_t* parser);
 ```
-
 
 ### parse_comment
 
@@ -216,21 +218,21 @@ Invoked by `parse` to parse a comment body.
 static void parse_comment(parse_info_t* parser, char c);
 ```
 
-
 ### parse_def_start
 
 Invoked by `parse` to look for a C def after a comment end.
 
-tic void parse_def_start(parse_info_t* parser, char c);
+```C
+static void parse_def_start(parse_info_t* parser, char c);
+```
 
- ### parse_def
+### parse_def
 
 Invoked by `parse` to parse a C definition/declaration.
 
 ```C
 static void parse_def(parse_info_t* parser, char c);
 ```
-
 
 ### parse
 
@@ -239,5 +241,4 @@ Parse the given input buffer.
 ```C
 static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len);
 ```
-
 

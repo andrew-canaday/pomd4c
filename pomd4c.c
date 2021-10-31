@@ -26,6 +26,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <limits.h>
 
 #include <sys/errno.h>
 
@@ -47,8 +49,8 @@
  *
  * ### This is all that it does:
  *
- * 1. It reads a file, specified as the only arg on the command line.
- * 1. It emits markdown on `stdout` (errors/debug messages on `stderr`).
+ * 1. Reads one or more files, specified on the command line.
+ * 1. Emits markdown on `stdout` (errors/debug messages on `stderr`).
  *
  * > :warning: **NOTE**: `pomd4c` _assumes input which has already passed
  * > muster for an actual C parser._ It's not strict or even very robust.
@@ -60,14 +62,14 @@
  * Afterwards, it spits them back out with the C defs wrapped in markdown
  * code fences and the comments emitted verbatim, save for:
  *
- *  - the leading `'/'`, `'*'`, `'*'`, `' '` sequence on the first line
- *  - the first **3** columns of any subsequent lines
+ *  - the leading `'/'`, `'*'`, `'*'`, sequence on the first line
+ *  - the first `POMD4C_SKIP_COLS` columns of any subsequent lines
  *  - the trailing `'*'`, `'/'`, `'\n'` sequence
  *
  *
  * ### This is how it works:
  *
- * 1. It looks for the character sequence `'/'`, `'*'`, `'*'`, ' '.
+ * 1. It looks for the character sequence `'/'`, `'*'`, `'*'`.
  *    (i.e. a doc comment start)
  * 1. Then it looks for the sequence `'*'`, `'/'`, `'\n'`.
  *    (i.e. a comment end)
@@ -88,62 +90,59 @@
 /** ## Definitions
  */
 
-/* Number of columns to skip when mid-comment: */
-#ifndef SKIP_COLS
-# define SKIP_COLS 3
-#endif /* SKIP_COLS */
-
 /* HACK: fixed-sized input buffer (read in chunks on a loop) */
 #ifndef BUF_SIZE
 # define BUF_SIZE 8192
 #endif /* BUF_SIZE */
 
-#define POMD4C_TRACE 0
-#if defined(POMD4C_TRACE) && (POMD4C_TRACE == 1)
-/** Simple debug logging function */
-# define LOG_TRACE(fmt, ...) \
-    fprintf(stderr, "TRACE: "fmt"\n", __VA_ARGS__)
-#else
-# define LOG_TRACE(...)
-#endif /* POMD4C_TRACE */
+#ifndef ENV_BUF_SIZE
+# define ENV_BUF_SIZE 4096
+#endif /* ENV_BUF_SIZE */
 
-#define POMD4C_DEBUG 0
-#if defined(POMD4C_DEBUG) && (POMD4C_DEBUG == 1)
-/** Simple debug logging function */
-# define LOG_DEBUG(fmt, ...) \
-    fprintf(stderr, "DEBUG: "fmt"\n", __VA_ARGS__)
-#else
-# define LOG_DEBUG(...)
-#endif /* POMD4C_DEBUG */
+/** Standard output, if -v: */
+#define LOG_INFO(fmt, ...) \
+    do { \
+        if( config.verbose > 0 ) { \
+            fprintf(stderr, "pomd4c "POMD4C_VERSION": "fmt"\n", __VA_ARGS__); \
+        } \
+    } while(0)
 
-/** Simple error logging function */
+/** Debug output, if -vv: */
+#define LOG_DEBUG(fmt, ...) \
+    do { \
+        if( config.verbose > 1 ) { \
+            fprintf(stderr, "DEBUG: "fmt"\n", __VA_ARGS__); \
+        } \
+    } while(0)
+
+/** Trace output, if -vvv: */
+#define LOG_TRACE(fmt, ...) \
+    do { \
+        if( config.verbose > 2 ) { \
+            fprintf(stderr, "TRACE: "fmt"\n", __VA_ARGS__); \
+        } \
+    } while(0)
+
+/** Simple warning log function */
+#define LOG_WARNING(fmt, ...) \
+    fprintf(stderr, "\033[00;34mWARNING: "fmt"\033[00;m\n", __VA_ARGS__)
+
+/** Simple error log function */
 #define LOG_ERROR(fmt, ...) \
-    fprintf(stderr, "ERROR: "fmt"\n", __VA_ARGS__)
+    fprintf(stderr, "\033[00;31mERROR: "fmt"\033[00;m\n", __VA_ARGS__)
 
-/** Log a formatted string message and `exit(1)`
- */
+/** Log a formatted string message and `exit(1)`. */
 #define ERROR_BAIL(fmt, ...) \
     LOG_ERROR(fmt, __VA_ARGS__); \
     exit(1)
 
-/** Log a plain string message and `exit(1)` */
+/** Log a plain string message and `exit(1)`. */
 #define ERROR_BAIL_MSG(msg) ERROR_BAIL("%s", msg)
 
-/** Version number as hex (most to least significant):
- *
- * - major version
- * - minor version
- * - patch level
- * - release annotation
- */
-#define POMD4C_VERSION 0x00020000
-
-#define POMD4C_MAJOR   ((POMD4C_VERSION >> 24) & 0xff)
-#define POMD4C_MINOR   ((POMD4C_VERSION >> 16) & 0xff)
-#define POMD4C_PATCH   ((POMD4C_VERSION >> 8)  & 0xff)
-#define POMD4C_RELEASE (POMD4C_VERSION         & 0xff)
-
-static size_t line = 0;
+/** Version number as a string literal. */
+#ifndef POMD4C_VERSION
+#define POMD4C_VERSION "0.2.0"
+#endif /* POMD4C_VERSION */
 
 /** ## Types
  */
@@ -156,13 +155,37 @@ typedef enum parser_state {
     PARSE_FILE,          /* Looking for doc comment start */
     PARSE_OPEN_SLASH,    /* Saw the initial '/', looking for '*' */
     PARSE_STAR,          /* Saw '*' after '/', looking for another */
-    PARSE_SPACE,         /* Saw '*' after '*', looking for a space */
-    PARSE_COMMENT,       /* Parsing comment def_pre (skips first 3 columns) */
+    PARSE_SPACE,         /* Saw '*' after '*', skip leading spaces */
+    PARSE_COMMENT,       /* Parsing comment (skips first 3 columns) */
     PARSE_NEWLINE,       /* Looking for newline after comment */
     PARSE_DEF_START,     /* Def parsing (optional) begins (skips leading ' ')*/
     PARSE_DEF,           /* Parsing the actual C def, looking for a LF */
     PARSE_DEF_END        /* End of def parsing */
 } parser_state_t;
+
+
+/** ## Globals */
+
+/* Settings: */
+const long DEFAULT_SKIP_COLS = 3;
+
+
+/** Runtime config */
+static struct {
+    unsigned int verbose;                  /* Verbosity */
+    unsigned     skip_cols;                /* Number of columns to skip */
+#ifdef POMD4C_CTRL_SEQ
+    const char*  ctrl_seq;                 /* Control sequence */
+#endif /* POMD4C_CTRL_SEQ */
+    const char*  post_path;                /* Post-processor path */
+    const char*  tmpdir;                   /* User TMPDIR */
+    const char*  input_path;               /* The current input file */
+    char         abs_input_path[PATH_MAX]; /* Absolute path to current input */
+    char         comment_path[PATH_MAX];   /* Path to the comment output */
+    char         source_path[PATH_MAX];    /* Path to the source output */
+    FILE*        comment_out;              /* Current comment output*/
+    FILE*        source_out;               /* Current source output*/
+} config;
 
 
 static const char* STATE_NAMES[] = {
@@ -177,11 +200,8 @@ static const char* STATE_NAMES[] = {
     "PARSE_DEF_END"
 };
 
-/** ### parse_info_t
- *
- * Struct used to encapsulate parser information/house output buffer.
- */
-typedef struct parse_info {
+/** Struct used to encapsulate parser information/house output buffer. */
+static struct {
     /* parser/input info: */
     parser_state_t state;             /* Current parser state */
     char           buffer[BUF_SIZE];  /* Parse temp buffer */
@@ -192,8 +212,6 @@ typedef struct parse_info {
     /* content pointers: */
     const char*    heading;           /* Heading, if present */
     const char*    summary;           /* First line of comment */
-    const char*    def_pre;           /* Remainder of comment (optional) */
-    const char*    def_post;          /* Post def content (optional) */
     const char*    def;               /* Beginning of C def (optional) */
     size_t         len;               /* Number of bytes written to buffer. */
 
@@ -202,17 +220,22 @@ typedef struct parse_info {
     char           last_saved;        /* Last char actually stored in buffer */
     char           last_seen;         /* Last char actually seen in file */
     int            is_macro;          /* Flag indicating macro def vs other */
-} parse_info_t;
+} parser;
 
 
 /** ## Functions
+ *
+ * Prototypes for illustration purposes only.
+ *
+ * _**WARNING**: DO NOT EAT. DO NOT INCINERATE._
+ *
  */
 
 /** ### parser_reset
  *
  * Reset the parser to initial state.
  */
-static void parser_reset(parse_info_t* parser);
+static void parser_reset(void);
 
 /** ### parser_write
  *
@@ -221,62 +244,63 @@ static void parser_reset(parse_info_t* parser);
  *  - `parser` a pointer to the current `parse_info_t`
  *  - `c` the character to write to the buffer
  */
-static void parser_write(parse_info_t* parser, char c);
+static void parser_write(char c);
 
 /** ### parser_write_comment
  *
  * Write a single character to the parser's output buffer IF the character is
- * a newline or the current column is greater than SKIP_COLS.
+ * a newline or the current column is greater than config.skip_cols.
  *
  *  - `parser` a pointer to the current `parse_info_t`
  *  - `c` the character to write to the buffer
  */
-static int parser_write_comment(parse_info_t* parser, char c);
+static int parser_write_comment(char c);
 
 /** ### parser_emit
  *
- * Emit the parsers output buffer as markdown.
+ * Emit the parsers output buffer as markdown output is STDOUT. Output buffer
+ * is emitted verbatim if -p has been specified.
  */
-static void parser_emit(parse_info_t* parser);
+static void parser_emit(void);
 
 /** ### parse_comment
  *
  * Invoked by `parse` to parse a comment body.
  */
-static void parse_comment(parse_info_t* parser, char c);
+static void parse_comment(char c);
 
 /** ### parse_def_start
  *
  * Invoked by `parse` to look for a C def after a comment end.
  */
-static void parse_def_start(parse_info_t* parser, char c);
+static void parse_def_start(char c);
 
 /** ### parse_def
  *
  * Invoked by `parse` to parse a C definition/declaration.
  */
-static void parse_def(parse_info_t* parser, char c);
+static void parse_def(char c);
 
 /** ### parse
  *
  * Parse the given input buffer.
  */
-static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len);
+static ssize_t parse(char* read_buf, size_t len);
 
 
 /*--------------------------------------------------
  * Functions:
  *--------------------------------------------------*/
-static void parser_reset(parse_info_t* parser)
+static void parser_reset(void)
 {
-    memset(parser, 0, sizeof(parse_info_t));
-    parser->recv = parser->buffer;
-    parser->row = 1;
+    memset(&parser, 0, sizeof(parser));
+    parser.recv = parser.buffer;
+    parser.row = 1;
     return;
 }
 
 
-static void parser_write(parse_info_t* parser, char c)
+static void parser_write(char c)
 {
 #ifdef POMD4C_CHECK_PRINTABLE
     if( c != '\0' && !isprint(c) ) {
@@ -284,97 +308,182 @@ static void parser_write(parse_info_t* parser, char c)
     }
 #endif /* POMD4C_CHECK_PRINTABLE */
 
-    *(parser->recv++) = c;
-    parser->last_saved = c;
-    parser->len++;
+    *(parser.recv++) = c;
+    parser.last_saved = c;
+    parser.len++;
     return;
 }
 
 
-static int parser_write_comment(parse_info_t* parser, char c)
+/* Always write newlines. All other chars are written if the column is
+ * greater than config.skip_cols: */
+static int is_comment_content(char c)
 {
-    if( c == '\n' || parser->col > SKIP_COLS ) {
-        parser_write(parser, c);
+    if( c == '\n' || parser.col > config.skip_cols ) {
         return 1;
     }
     return 0;
 }
 
-static void parser_emit(parse_info_t* parser)
+/* This bit is used to facilitate writing headings on the same line as the
+ * initial slash-star-star: */
+static int is_heading(char c)
 {
-    parser->buffer[BUF_SIZE-1] = '\0'; /* HACK HACK HACK */
+    if( c != ' ' && parser.col > (config.skip_cols-1) ) {
+        return 1;
+    }
+    return 0;
+}
 
-    /* Heading (optional) */
-    if( parser->heading ) {
-        printf("\n%s\n", parser->heading);
+static int parser_write_comment(char c)
+{
+    if( is_comment_content(c) || is_heading(c) ) {
+        parser_write(c);
+        return 1;
+    }
+    return 0;
+}
+
+static void parser_emit(void)
+{
+    parser.buffer[BUF_SIZE-1] = '\0'; /* HACK HACK HACK */
+
+    if( config.post_path ) {
+        /* comment file: */
+        sprintf(config.comment_path, "%s%s", config.tmpdir, "comment-XXXXXX");
+        if( !mktemp(config.comment_path) ) {
+            goto emit_bail;
+        }
+
+        config.comment_out = fopen(config.comment_path, "w");
+        if( !config.comment_out ) {
+            goto emit_bail;
+        }
+        LOG_DEBUG("comment tmp file: %s", config.comment_path);
     }
 
     /* Summary: the only thing, if there's anything at all. */
-    printf("%s\n", parser->summary);
+    fprintf(config.comment_out,"%s\n\n", parser.summary);
 
-    if( parser->def_pre ) {
-        printf("\n%s\n", parser->def_pre);
+    if( config.post_path ) {
+        fclose(config.comment_out);
     }
 
-    /* Def: the C definition/declaration (optional) */
-    if( parser->def ) {
-        printf("\n```C\n%s\n```\n", parser->def);
+    if( parser.def ) {
+        if( config.post_path ) {
+            /* source file: */
+            sprintf(config.source_path, "%s%s", config.tmpdir, "source-XXXXXX");
+            if( !mktemp(config.source_path) ) {
+                goto emit_bail;
+            }
+
+            config.source_out = fopen(config.source_path, "w");
+            if( !config.source_out ) {
+                goto emit_bail;
+            }
+            LOG_DEBUG("source tmp file: %s", config.source_path);
+            fprintf(config.source_out,"%s\n", parser.def);
+        } else {
+            /* Wrap in code fences, if postprocess isn't specified: */
+            fprintf(config.source_out,"\n```C\n%s\n```\n\n", parser.def);
+        }
+
+        if( config.post_path ) {
+            fclose(config.source_out);
+        }
     }
 
-    /* The post-def comment body (optional) */
-    if( parser->def_post ) {
-        printf("\n%s\n", parser->def_post);
-    }
+    /* Invoke post-processor.
+     * TODO:
+     * - should we do this all at once at the end?
+     * - should we run multiple in parallel?
+     */
+    if( config.post_path ) {
+        pid_t post_pid = fork();
 
-    puts("\n");
+        if( !post_pid ) {
+            LOG_DEBUG("Executing: %s", config.post_path);
+            setenv("POMD4C_SOURCE", config.abs_input_path, 1);
+            setenv("POMD4C_VERSION", POMD4C_VERSION, 1);
+            errno = 0;
+            int r_val = execlp(
+                    config.post_path, config.post_path,
+                    config.comment_path, config.source_path,
+                    NULL);
+            if( r_val ) {
+                LOG_ERROR("Failed to launch post proc %s: %s",
+                        config.post_path, strerror(errno));
+                exit(1);
+            }
+        }
+
+        if( post_pid > 0 ) {
+            while( (post_pid = waitpid(-1, 0, 0)) > 0 )
+            {
+                LOG_DEBUG("Waiting on process %i to complete", (int)post_pid);
+            }
+        } else {
+            LOG_ERROR("Postprocessing failed: %s", strerror(errno));
+            goto emit_bail;
+        }
+    }
+    return;
+
+emit_bail:
+    if( config.post_path ) {
+        fclose(config.comment_out);
+        fclose(config.source_out);
+    }
+    LOG_ERROR("Failed to write docs: %s", strerror(errno));
+    exit(1);
     return;
 }
 
 
-static void parse_comment(parse_info_t* parser, char c)
+static void parse_comment(char c)
 {
     /* Check for end-of-comment: */
-    if( c == '/' && parser->last_seen == '*' ) {
+    if( c == '/' && parser.last_seen == '*' ) {
         /* Delete that last '*' and write string terminal: */
-        parser->recv--;
-        parser_write(parser, '\0');
-        parser->def = parser->recv;
-        parser->state++;
+        parser.recv--;
+        parser_write('\0');
+        parser.def = parser.recv;
+        parser.state++;
     } else {
-        parser_write_comment(parser, c);
+        parser_write_comment(c);
     }
     return;
 }
 
 
-static void parse_def_start(parse_info_t* parser, char c)
+static void parse_def_start(char c)
 {
     switch(c) {
         /* If we hit a newline before anything else: give up on defs + emit. */
         case '\n':
-            parser->def = NULL;
-            parser_emit(parser);
-            parser_reset(parser);
+            parser.def = NULL;
+            parser_emit();
+            parser_reset();
             break;
-        /* Else, ignore leading spaces. */
+            /* Else, ignore leading spaces. */
         case ' ':
             /* fallthrough */
         case '\t':
             break;
-        /* Okay! We've got something substantive; start parsing the def. */
+            /* Okay! We've got something substantive; start parsing the def. */
         case '#':
-            parser->is_macro = 1;
+            parser.is_macro = 1;
             /* fallthrough */
         default:
-            parser_write(parser, c);
-            parser->state++;
+            parser_write(c);
+            parser.state++;
             break;
     }
     return;
 }
 
 
-static void parse_def(parse_info_t* parser, char c)
+static void parse_def(char c)
 {
     /* If we haven't already decided if we're nested or what characters
      * we're using to check for nesting, check to see if the present
@@ -384,12 +493,12 @@ static void parse_def(parse_info_t* parser, char c)
         case '(':
             /* fallthrough */
         case '{':
-            parser->nest_lvl++;
+            parser.nest_lvl++;
             break;
         case ')':
             /* fallthrough */
         case '}':
-            parser->nest_lvl--;
+            parser.nest_lvl--;
             break;
         default:
             break;
@@ -397,118 +506,290 @@ static void parse_def(parse_info_t* parser, char c)
 
     if( c == '\n'
 #ifdef POMD4C_BACKSLASH_ESCAPES
-            && parser->last_saved != '\\'
+            && parser.last_saved != '\\'
 #endif /* POMD4C_BACKSLASH_ESCAPES */
-            && parser->nest_lvl == 0 ) {
-        parser->state = PARSE_DEF_END;
+            && parser.nest_lvl == 0 ) {
+        parser.state = PARSE_DEF_END;
         return;
     }
 
     /* Whatever it is, write it down: */
-    parser_write(parser, c);
+    parser_write(c);
     return;
 }
 
 
-static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len)
+static ssize_t parse(char* read_buf, size_t len)
 {
     char* src = read_buf;
     size_t idx = 0;
     for(idx=0; idx < len; idx++ ) {
         /* HACK HACK: Store the last character, if there was one. */
         if( idx > 0 ) {
-            parser->last_seen = *(src-1);
+            parser.last_seen = *(src-1);
         }
 
         char c = *src++;
-        LOG_TRACE("%04zu,%04zu:%s: '%c' (term: '%c'; seen: %c'; saved: '%c')",
-            parser->row, parser->col,
-            STATE_NAMES[parser->state], c,
-            parser->last_seen,
-            parser->last_saved
-            );
+        LOG_TRACE("%04zu,%04zu:%s: '%c' (seen: %c'; saved: '%c')",
+                parser.row, parser.col,
+                STATE_NAMES[parser.state], c,
+                parser.last_seen,
+                parser.last_saved
+                );
 
         if( c == '\n' ) {
-            line++;
-            parser->row++;
-            parser->col = 0;
+            parser.row++;
+            parser.col = 0;
         } else {
-            parser->col++;
+            parser.col++;
         }
 
-        switch(parser->state) {
+        switch(parser.state) {
             case PARSE_FILE:
                 /* Chug along until we hit a '/' */
                 if( c == '/' ) {
-                    parser->state++;
+                    parser.state++;
                 }
                 break;
             case PARSE_OPEN_SLASH:
                 /* We got a '/', so expect a '*'; else: reset! */
                 if( c == '*' ) {
-                    parser->state++;
+                    parser.state++;
                 } else {
-                    parser_reset(parser);
+                    parser_reset();
                 }
                 break;
             case PARSE_STAR:
                 /* We got a '*', so expect another; else: reset! */
                 if( c == '*' ) {
-                    parser->state++;
+                    parser.state++;
                 } else {
-                    parser_reset(parser);
+                    parser_reset();
                 }
                 break;
             case PARSE_SPACE:
                 /* We got a second '*', so expect ' '; else: reset! */
                 if( c == ' ' ) {
-                    parser->state++;
-                    parser->summary = parser->recv;
-                } else {
-                    parser_reset(parser);
+                    break;
                 }
-                break;
+                parser.state++;
+                parser.summary = parser.recv;
+                /* fallthrough */
             case PARSE_COMMENT:
-                parse_comment(parser, c);
+                parse_comment(c);
                 break;
             case PARSE_NEWLINE:
-                /* If we hit a newline, this comment is just a block of
-                 * markdown to emit on its own: */
+                /* If we hit a newline, output this comment on its own without
+                 * looking for a def/decl: */
                 if( c == '\n' ) {
-                    parser->state++;
+                    parser.state++;
                 } else {
                     /* Otherwise, start parsing the def text: */
-                    parser->def = NULL;
-                    parser_emit(parser);
-                    parser_reset(parser);
+                    parser.def = NULL;
+                    parser_emit();
+                    parser_reset();
                 }
                 break;
             case PARSE_DEF_START:
-                parse_def_start(parser, c);
+                parse_def_start(c);
                 break;
             case PARSE_DEF:
 still_in_def:
-                parse_def(parser, c);
+                parse_def(c);
                 break;
-            /* HACK HACK HACK */
+                /* HACK HACK HACK */
             case PARSE_DEF_END:
                 if( c == '\n' || c == '#' ) {
-                    if( parser->is_macro || parser->last_seen == '\n' ) {
-                        parser_write(parser, '\0');
-                        parser_emit(parser);
-                        parser_reset(parser);
+                    if( parser.is_macro || parser.last_seen == '\n' ) {
+                        parser_write('\0');
+                        parser_emit();
+                        parser_reset();
                     } else {
-                        parser_write(parser, c);
+                        parser_write(c);
                     }
                 } else {
-                    parser_write(parser, '\n'); /* write the LF we skipped */
-                    parser->state = PARSE_DEF;
+                    parser_write('\n'); /* write the LF we skipped */
+                    parser.state = PARSE_DEF;
                     goto still_in_def;
                 }
                 break;
         }
     }
     return idx;
+}
+
+#define USAGE_STR \
+    "pomd4c "POMD4C_VERSION"\n" \
+    "USAGE: %s [OPTIONS] FILE1 [FILE2...FILEN]\n" \
+    "\nOPTIONS:\n" \
+    " -h\tUsage info (this)\n" \
+    " -v\tVerbosity (more times == more verbose)\n" \
+    " -p\tPost-process output script (default: none)\n" \
+    " -e\tSpecify a postprocessor env parameter (multiple ok)\n" \
+    "   \t(e.g.: pomd4c -e 'my_key=my_value')\n" \
+    "\n" \
+    "POSTPROCESSING\n" \
+    "\n" \
+    "  By default, pomd4c simply buffers the contents of special comments\n" \
+    "  and any C entitity that follows immediately afterwards. Output is\n" \
+    "  direct to STDOUT.\n" \
+    "\n" \
+    "  To facilitate additional formatting and file handling, pomd4c can\n" \
+    "  optionally offload the last step — formatting and file writing —\n" \
+    "  to an auxiliary process, e.g.:\n" \
+    "\n" \
+    "    $ pomd4c -p /path/to/my/script ./my_source.c\n" \
+    "\n" \
+    "  The process receives two arguments, \"COMMENT\" and \"BODY\": they are\n" \
+    "  paths to temp files containing the comment data and the subsequent\n" \
+    "  C entity (if present). STDOUT and STDERR are left open (mind your\n" \
+    "  STDOUT if you're leveraging redirects!). Parameters and metadata\n" \
+    "  are provided through the env. C entities are NOT wrapped in code\n" \
+    "  fences.\n" \
+    "\n" \
+    "\n" \
+    "POSTPROCESS ENV\n" \
+    "\n" \
+    "  pomd4c provides some limited metadata to postprocessing scripts, by\n" \
+    "  way of env vars with a \"POMD4C_\" prefix, e.g.:\n" \
+    "\n" \
+    "      POMD4C_VERSION: the current pomd4c version...\n" \
+    "      POMD4C_SOURCE:  the path (absolute) to the current source\n" \
+    "\n" \
+    "\n" \
+    "ENVIRONMENT\n" \
+    "\n" \
+    "  Some pomd4c behavior can be further customized via env vars:\n" \
+    "\n" \
+    "    NAME:              DESRIPTION:                         DEFAULT:\n" \
+    "    POMD4C_SKIP_COLS   Number of comment columns to skip   3\n" \
+    "\n"
+
+#if 0
+    " -c\tSpecify a control sequence (default: unset)\n" \
+    "CONTROL SEQUENCES\n" \
+    "\n" \
+    "  Not implemented yet. It's just an option and this usage blurb, at\n" \
+    "  the moment. The gist is: allow the user to define some character\n" \
+    "  sequence that is used to move some comment data into the env, to\n" \
+    "  allow scripts to define their own commands, e.g.:\n" \
+    "\n" \
+    "    my_source.c comment body:\n" \
+    "      This is the text of some comment. You get the idea.\n" \
+    "\n" \
+    "      :param stuff: does whatever\n" \
+    "\n" \
+    "      etc\n" \
+    "\n" \
+    "      The control sequence part of it is on the next line:\n" \
+    "      ^e: my_param=yes\n" \
+    "\n" \
+    "    my-postproc-script.sh:\n" \
+    "      if [ \"x${POMD4C_MY_PARAM}\" == \"xyes\" ]; then\n" \
+    "          do_something_special()\n" \
+    "      fi\n" \
+    "\n" \
+    "    Invocation:\n" \
+    "      pomd4c -p my-postproc-script.sh -c '^e:' ./my-source.c\n" \
+    "\n" \
+    "  The string following the control sequence can be a key/value pair\n" \
+    "  or just a literal string. It's handled like this:\n" \
+    "\n" \
+    "   - Env names have to start with a [A-Z] and consist of [A-Z_0-9].\n" \
+    "     any characters outside of that range are converted to '_'.\n" \
+    "\n" \
+    "   - If there is a '=' character, the characters on the left side of\n" \
+    "     the first '=', transformed as above, are used as the env name — \n" \
+    "     with the prefix \"POMD4C_ARG_\" prepended. Everything on the right\n" \
+    "     becomes the value.\n" \
+    "\n" \
+    "   - In any case, the whole line is also captured as a value and stored\n" \
+    "     in the newline-delmited env var \"POMD4C_PARAMETERS\".\n" \
+    "\n" \
+    "  Do with it what you will.\n" \
+    "\n" \
+    "\n" \
+
+#endif
+
+static void usage(const char* name) {
+    fprintf(stderr, USAGE_STR, name);
+    return;
+}
+
+
+static int add_env_param(const char* param_str)
+{
+    char  key[ENV_BUF_SIZE];
+    char* value;
+
+    snprintf(key, ENV_BUF_SIZE-1, "POMD4C_ARG_%s", param_str);
+
+    value = strchr(key, '=');
+    if( value == NULL || *value == '\0' ) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    *value++ = '\0';
+
+    for(char* c=key; *c; c++) {
+        *c = toupper(*c);
+    }
+    errno = 0;
+    return setenv(key, value, 1);
+}
+
+
+static int env_as_long(const char* env_name, long* value, const long* def_val)
+{
+    if( !env_name ) {
+        return EINVAL;
+    }
+
+    const char* env_s = getenv(env_name);
+    if( !env_s ) {
+        goto long_env_unset;
+    }
+
+    char* endptr;
+    long env_l = strtol(env_s, &endptr, 10);
+    if( *endptr == '\0' ) {
+        *value = env_l;
+        return 0;
+    }
+
+long_env_unset:
+    if( def_val ) {
+        *value = *def_val;
+        return 0;
+    }
+    return EINVAL;
+}
+
+
+static int configure_parser(void)
+{
+    char tmp[ENV_BUF_SIZE];
+
+    /* If not post processing, output is to STDOUT: */
+    if( !config.post_path ) {
+        config.comment_out = stdout;
+        config.source_out = stdout;
+    } else {
+        LOG_DEBUG("Post processor: %s", config.post_path);
+    }
+
+    /* POMD4C_SKIP_COLS: */
+    long skip_cols;
+    env_as_long("POMD4C_SKIP_COLS", &skip_cols, &DEFAULT_SKIP_COLS);
+    if( skip_cols < 0 ) {
+        skip_cols = DEFAULT_SKIP_COLS;
+    }
+    config.skip_cols = skip_cols;
+    snprintf(tmp, ENV_BUF_SIZE-1, "%li", skip_cols);
+    setenv("POMD4C_SKIP_COLS", tmp, 1);
+    return 0;
 }
 
 
@@ -524,37 +805,99 @@ still_in_def:
  */
 int main(int argc, char** argv)
 {
-    if( argc < 2 ) {
+#ifdef POMD4C_CTRL_SEQ
+# define POMD4C_OPTIONS "hvp:c:e:"
+#else
+# define POMD4C_OPTIONS "hvp:e:"
+#endif /* POMD4C_CTRL_SEQ */
+
+    int ch;
+    memset(&config, 0, sizeof(config));
+    config.tmpdir = getenv("TMPDIR");
+
+    while ((ch = getopt(argc, argv, POMD4C_OPTIONS)) != -1) {
+        switch (ch) {
+            case 'h':
+                usage(argv[0]);
+                return 0;
+            case 'v':
+                config.verbose++;
+                break;
+            case 'p':
+                config.post_path = optarg;
+                break;
+#ifdef POMD4C_CTRL_SEQ
+            case 'c':
+                config.ctrl_seq = optarg;
+                break;
+#endif /* POMD4C_CTRL_SEQ */
+            case 'e':
+                add_env_param(optarg);
+                break;
+            default:
+                usage(argv[0]);
+                return -1;
+        }
+    }
+    argc -= (optind);
+    argv += (optind);
+
+    if( argc < 1 ) {
         ERROR_BAIL_MSG("No input file specified.");
     }
 
-    const char* input_path = argv[1];
-    FILE* source_file = fopen(input_path, "r");
+    configure_parser();
 
-    if( !source_file ) {
-        ERROR_BAIL("Unable to open file %s: %s", input_path, strerror(errno));
+    FILE* source_file = NULL;
+    for(int i=0; i<argc; i++) {
+        errno = 0;
+
+        config.input_path = argv[i];
+        char* abs_path = realpath(
+                config.input_path, (char*)&config.abs_input_path);
+        if( !abs_path ) {
+            LOG_WARNING(
+                    "Unable to process %s: %s",
+                    config.input_path, strerror(errno));
+            continue;
+        }
+
+        LOG_INFO("Processing: %s", config.input_path);
+        source_file = fopen(config.input_path, "r");
+
+        if( !source_file ) {
+            goto err_bail;
+        }
+
+        char buffer[BUF_SIZE];
+        size_t bytes_read = 0;
+        parser_reset();
+
+        do {
+            errno = 0;
+            bytes_read = fread(buffer, 1, BUF_SIZE, source_file);
+            if( !bytes_read ) {
+                break;
+            }
+
+            if( parse(buffer, bytes_read) < 0 ) {
+                goto err_bail;
+            }
+        } while( bytes_read > 0 );
+
+        fclose(source_file);
     }
 
-    char buffer[BUF_SIZE];
-    size_t bytes_read = 0;
-    parse_info_t parser;
-    parser_reset(&parser);
-
-    do {
-        bytes_read = fread(buffer, 1, BUF_SIZE, source_file);
-        if( !bytes_read ) {
-            goto close_and_exit;
-        }
-
-        if( parse(&parser, buffer, bytes_read) < 0 ) {
-            LOG_ERROR("Parsing stopped with %zu bytes read", bytes_read);
-            goto close_and_exit;
-        }
-    } while( bytes_read > 0 );
-
-close_and_exit:
-    fclose(source_file);
     return 0;
+
+err_bail:
+    LOG_ERROR("pomd4c encountered an unrecoverable error:\n%s", strerror(errno));
+    fclose(source_file);
+    if( config.post_path ) {
+        fclose(config.comment_out);
+        fclose(config.source_out);
+    }
+    return -1;
 }
 
 /* EOF: pomd4c.c */

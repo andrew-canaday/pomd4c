@@ -2,3 +2,5 @@ pomd4c
 *~
 ~*
 *.dSYM
+*.rst
+.DS_Store
