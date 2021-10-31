@@ -99,6 +99,10 @@
 # define ENV_BUF_SIZE 4096
 #endif /* ENV_BUF_SIZE */
 
+#ifndef PARAM_PREFIX
+# define PARAM_PREFIX "POMD4C_P_"
+#endif /* PARAM_PREFIX */
+
 /** Standard output, if -v: */
 #define LOG_INFO(fmt, ...) \
     do { \
@@ -141,7 +145,7 @@
 
 /** Version number as a string literal. */
 #ifndef POMD4C_VERSION
-#define POMD4C_VERSION "0.2.0"
+#define POMD4C_VERSION "0.9.0"
 #endif /* POMD4C_VERSION */
 
 /** ## Types
@@ -653,8 +657,16 @@ still_in_def:
     "  pomd4c provides some limited metadata to postprocessing scripts, by\n" \
     "  way of env vars with a \"POMD4C_\" prefix, e.g.:\n" \
     "\n" \
-    "      POMD4C_VERSION: the current pomd4c version...\n" \
-    "      POMD4C_SOURCE:  the path (absolute) to the current source\n" \
+    "      POMD4C_VERSION:   the current pomd4c version...\n" \
+    "      POMD4C_SOURCE:    the path (absolute) to the current source\n" \
+    "      POMD4C_SKIP_COLS: number of comment columns to skip   3\n" \
+    "\n" \
+    "  The environment can be further extended using the -e option, which\n" \
+    "  takes arguments in the format \"NAME=value\" and creates environment\n" \
+    "  variables with a "PARAM_PREFIX" prefix, e.g.:\n" \
+    "      $ pomd4c -p ./my-script.sh -e my_param=value ...\n" \
+    "\n" \
+    "  Will set the env var "PARAM_PREFIX"MY_PARAM equal to \"value\"\n" \
     "\n" \
     "\n" \
     "ENVIRONMENT\n" \
@@ -700,7 +712,7 @@ still_in_def:
     "\n" \
     "   - If there is a '=' character, the characters on the left side of\n" \
     "     the first '=', transformed as above, are used as the env name — \n" \
-    "     with the prefix \"POMD4C_ARG_\" prepended. Everything on the right\n" \
+    "     with the prefix \""PARAM_PREFIX"\" prepended. Everything on the right\n" \
     "     becomes the value.\n" \
     "\n" \
     "   - In any case, the whole line is also captured as a value and stored\n" \
@@ -723,7 +735,7 @@ static int add_env_param(const char* param_str)
     char  key[ENV_BUF_SIZE];
     char* value;
 
-    snprintf(key, ENV_BUF_SIZE-1, "POMD4C_ARG_%s", param_str);
+    snprintf(key, ENV_BUF_SIZE-1, ""PARAM_PREFIX"%s", param_str);
 
     value = strchr(key, '=');
     if( value == NULL || *value == '\0' ) {

@@ -16,8 +16,8 @@ generator*.
 
 ### This is all that it does:
 
-1. It reads a file, specified as the only arg on the command line.
-1. It emits markdown on `stdout` (errors/debug messages on `stderr`).
+1. Reads one or more files, specified on the command line.
+1. Emits markdown on `stdout` (errors/debug messages on `stderr`).
 
 > :warning: **NOTE**: `pomd4c` _assumes input which has already passed
 > muster for an actual C parser._ It's not strict or even very robust.
@@ -30,7 +30,7 @@ Afterwards, it spits them back out with the C defs wrapped in markdown
 code fences and the comments emitted verbatim, save for:
 
  - the leading `'/'`, `'*'`, `'*'`, sequence on the first line
- - the first **3** columns of any subsequent lines
+ - the first `POMD4C_SKIP_COLS` columns of any subsequent lines
  - the trailing `'*'`, `'/'`, `'\n'` sequence
 
 
@@ -50,14 +50,18 @@ levels in the most simplistic way possible.
 That's it!
 
 ---
+
 # API 
+
 ## Definitions
+
 Standard output, if -v: 
+
 
 ```C
 #define LOG_INFO(fmt, ...) \
     do { \
-        if( verbose > 0 ) { \
+        if( config.verbose > 0 ) { \
             fprintf(stderr, "pomd4c "POMD4C_VERSION": "fmt"\n", __VA_ARGS__); \
         } \
     } while(0)
@@ -65,10 +69,11 @@ Standard output, if -v:
 
 Debug output, if -vv: 
 
+
 ```C
 #define LOG_DEBUG(fmt, ...) \
     do { \
-        if( verbose > 1 ) { \
+        if( config.verbose > 1 ) { \
             fprintf(stderr, "DEBUG: "fmt"\n", __VA_ARGS__); \
         } \
     } while(0)
@@ -76,16 +81,18 @@ Debug output, if -vv:
 
 Trace output, if -vvv: 
 
+
 ```C
 #define LOG_TRACE(fmt, ...) \
     do { \
-        if( verbose > 2 ) { \
+        if( config.verbose > 2 ) { \
             fprintf(stderr, "TRACE: "fmt"\n", __VA_ARGS__); \
         } \
     } while(0)
 ```
 
 Simple warning log function 
+
 
 ```C
 #define LOG_WARNING(fmt, ...) \
@@ -94,12 +101,14 @@ Simple warning log function
 
 Simple error log function 
 
+
 ```C
 #define LOG_ERROR(fmt, ...) \
     fprintf(stderr, "\033[00;31mERROR: "fmt"\033[00;m\n", __VA_ARGS__)
 ```
 
 Log a formatted string message and `exit(1)`. 
+
 
 ```C
 #define ERROR_BAIL(fmt, ...) \
@@ -109,20 +118,24 @@ Log a formatted string message and `exit(1)`.
 
 Log a plain string message and `exit(1)`. 
 
+
 ```C
 #define ERROR_BAIL_MSG(msg) ERROR_BAIL("%s", msg)
 ```
 
 Version number as a string literal. 
 
+
 ```C
 #ifndef POMD4C_VERSION
 ```
 
 ## Types
+
 ### parser_state_t
 
 Enum used to track the present state of the parser.
+
 
 ```C
 typedef enum parser_state {
@@ -138,12 +151,34 @@ typedef enum parser_state {
 } parser_state_t;
 ```
 
-### parse_info_t
+## Globals 
 
-Struct used to encapsulate parser information/house output buffer.
+Runtime config 
+
 
 ```C
-typedef struct parse_info {
+static struct {
+    unsigned int verbose;                  /* Verbosity */
+    unsigned     skip_cols;                /* Number of columns to skip */
+#ifdef POMD4C_CTRL_SEQ
+    const char*  ctrl_seq;                 /* Control sequence */
+#endif /* POMD4C_CTRL_SEQ */
+    const char*  post_path;                /* Post-processor path */
+    const char*  tmpdir;                   /* User TMPDIR */
+    const char*  input_path;               /* The current input file */
+    char         abs_input_path[PATH_MAX]; /* Absolute path to current input */
+    char         comment_path[PATH_MAX];   /* Path to the comment output */
+    char         source_path[PATH_MAX];    /* Path to the source output */
+    FILE*        comment_out;              /* Current comment output*/
+    FILE*        source_out;               /* Current source output*/
+} config;
+```
+
+Struct used to encapsulate parser information/house output buffer. 
+
+
+```C
+static struct {
     /* parser/input info: */
     parser_state_t state;             /* Current parser state */
     char           buffer[BUF_SIZE];  /* Parse temp buffer */
@@ -162,7 +197,7 @@ typedef struct parse_info {
     char           last_saved;        /* Last char actually stored in buffer */
     char           last_seen;         /* Last char actually seen in file */
     int            is_macro;          /* Flag indicating macro def vs other */
-} parse_info_t;
+} parser;
 ```
 
 ## Functions
@@ -171,12 +206,14 @@ Prototypes for illustration purposes only.
 
 _**WARNING**: DO NOT EAT. DO NOT INCINERATE._
 
+
 ### parser_reset
 
 Reset the parser to initial state.
 
+
 ```C
-static void parser_reset(parse_info_t* parser);
+static void parser_reset(void);
 ```
 
 ### parser_write
@@ -186,59 +223,67 @@ Unconditionally write a single character to the parser's output buffer.
  - `parser` a pointer to the current `parse_info_t`
  - `c` the character to write to the buffer
 
+
 ```C
-static void parser_write(parse_info_t* parser, char c);
+static void parser_write(char c);
 ```
 
 ### parser_write_comment
 
 Write a single character to the parser's output buffer IF the character is
-a newline or the current column is greater than SKIP_COLS.
+a newline or the current column is greater than config.skip_cols.
 
  - `parser` a pointer to the current `parse_info_t`
  - `c` the character to write to the buffer
 
+
 ```C
-static int parser_write_comment(parse_info_t* parser, char c);
+static int parser_write_comment(char c);
 ```
 
 ### parser_emit
 
-Emit the parsers output buffer as markdown.
+Emit the parsers output buffer as markdown output is STDOUT. Output buffer
+is emitted verbatim if -p has been specified.
+
 
 ```C
-static void parser_emit(parse_info_t* parser);
+static void parser_emit(void);
 ```
 
 ### parse_comment
 
 Invoked by `parse` to parse a comment body.
 
+
 ```C
-static void parse_comment(parse_info_t* parser, char c);
+static void parse_comment(char c);
 ```
 
 ### parse_def_start
 
 Invoked by `parse` to look for a C def after a comment end.
 
+
 ```C
-static void parse_def_start(parse_info_t* parser, char c);
+static void parse_def_start(char c);
 ```
 
 ### parse_def
 
 Invoked by `parse` to parse a C definition/declaration.
 
+
 ```C
-static void parse_def(parse_info_t* parser, char c);
+static void parse_def(char c);
 ```
 
 ### parse
 
 Parse the given input buffer.
 
+
 ```C
-static ssize_t parse(parse_info_t* parser, char* read_buf, size_t len);
+static ssize_t parse(char* read_buf, size_t len);
 ```
 

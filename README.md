@@ -84,7 +84,7 @@ int my_func(uint32_t flags, const char* msg);
 ## Usage
 
 ```
-pomd4c 0.2.0
+pomd4c 0.9.0
 USAGE: ./pomd4c [OPTIONS] FILE1 [FILE2...FILEN]
 
 OPTIONS:
