@@ -119,8 +119,16 @@ POSTPROCESS ENV
   pomd4c provides some limited metadata to postprocessing scripts, by
   way of env vars with a "POMD4C_" prefix, e.g.:
 
-      POMD4C_VERSION: the current pomd4c version...
-      POMD4C_SOURCE:  the path (absolute) to the current source
+      POMD4C_VERSION:   the current pomd4c version...
+      POMD4C_SOURCE:    the path (absolute) to the current source
+      POMD4C_SKIP_COLS: number of comment columns to skip   3
+
+  The environment can be further extended using the -e option, which
+  takes arguments in the format "NAME=value" and creates environment
+  variables with a POMD4C_P_ prefix, e.g.:
+      $ pomd4c -p ./my-script.sh -e my_param=value ...
+
+  Will set the env var POMD4C_P_MY_PARAM equal to "value"
 
 
 ENVIRONMENT
@@ -130,3 +138,4 @@ ENVIRONMENT
     NAME:              DESRIPTION:                         DEFAULT:
     POMD4C_SKIP_COLS   Number of comment columns to skip   3
 ```
+
