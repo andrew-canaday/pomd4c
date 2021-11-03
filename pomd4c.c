@@ -28,8 +28,11 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <limits.h>
+#include <fcntl.h>
 
 #include <sys/errno.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 /** # POMD4C
  *
@@ -860,7 +863,7 @@ int main(int argc, char** argv)
 
     configure_parser();
 
-    FILE* source_file = NULL;
+    int source_fd = -1;
     for(int i=0; i<argc; i++) {
         errno = 0;
 
@@ -875,36 +878,45 @@ int main(int argc, char** argv)
         }
 
         LOG_INFO("Processing: %s", config.input_path);
-        source_file = fopen(config.input_path, "r");
 
-        if( !source_file ) {
+        source_fd = open(config.input_path, O_RDONLY);
+        if( source_fd < 0 ) {
             goto err_bail;
         }
 
-        char buffer[BUF_SIZE];
-        size_t bytes_read = 0;
+        struct stat source_stat;
+        int stat_ok = fstat(source_fd, &source_stat);
+        if( stat_ok < 0 ) {
+            goto err_bail;
+        }
+
+        char* buffer = mmap(0, source_stat.st_size,
+                PROT_READ, MAP_FILE | MAP_PRIVATE, source_fd, 0);
+        if( buffer == MAP_FAILED ) {
+            goto err_bail;
+        }
+
         parser_reset();
 
-        do {
-            errno = 0;
-            bytes_read = fread(buffer, 1, BUF_SIZE, source_file);
-            if( !bytes_read ) {
-                break;
-            }
+        errno = 0;
+        if( parse(buffer, source_stat.st_size) < 0 ) {
+            LOG_ERROR("Parsing for %s failed at row %zu, column %zu",
+                    config.input_path, parser.row, parser.col);
+            goto err_bail;
+        }
 
-            if( parse(buffer, bytes_read) < 0 ) {
-                goto err_bail;
-            }
-        } while( bytes_read > 0 );
-
-        fclose(source_file);
+        munmap(buffer, source_stat.st_size);
+        close(source_fd);
+        source_fd = -1;
     }
 
     return 0;
 
 err_bail:
     LOG_ERROR("pomd4c encountered an unrecoverable error:\n%s", strerror(errno));
-    fclose(source_file);
+    if( source_fd >=0 ) {
+        close(source_fd);
+    }
     if( config.post_path ) {
         fclose(config.comment_out);
         fclose(config.source_out);
