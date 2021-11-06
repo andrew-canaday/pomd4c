@@ -30,6 +30,11 @@
 #include <limits.h>
 #include <fcntl.h>
 
+#ifdef __linux__
+#include <sys/types.h>
+#include <sys/wait.h>
+#endif /* __linux__ */
+
 #include <sys/errno.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
