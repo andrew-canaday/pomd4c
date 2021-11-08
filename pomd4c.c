@@ -417,10 +417,15 @@ static void parser_emit(void)
             LOG_DEBUG("Executing: %s", config.post_path);
             setenv("POMD4C_SOURCE", config.abs_input_path, 1);
             setenv("POMD4C_VERSION", POMD4C_VERSION, 1);
+
+            const char* source_path = config.source_path;
+            if( !parser.def ) {
+                source_path = NULL;
+            }
             errno = 0;
             int r_val = execlp(
                     config.post_path, config.post_path,
-                    config.comment_path, config.source_path,
+                    config.comment_path, source_path,
                     NULL);
             if( r_val ) {
                 LOG_ERROR("Failed to launch post proc %s: %s",
