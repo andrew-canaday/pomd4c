@@ -426,7 +426,7 @@ static void parser_emit(void)
                     NULL);
             LOG_ERROR("Failed to launch post proc %s: %s",
                     config.post_path, strerror(errno));
-            exit(1);
+            exit(errno);
         }
 
         if( post_pid > 0 ) {
@@ -860,7 +860,9 @@ int main(int argc, char** argv)
         errno = 0;
 
         /* Invoke the postproc script once with no args to notify we're
-         * starting a file:
+         * starting a file.
+         *
+         * TODO: move the fork/execlp to a utility function.
          */
         pid_t post_pid = fork();
         if( !post_pid ) {
