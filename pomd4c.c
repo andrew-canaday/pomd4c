@@ -186,9 +186,6 @@ const long DEFAULT_SKIP_COLS = 3;
 static struct {
     unsigned int verbose;                  /* Verbosity */
     unsigned     skip_cols;                /* Number of columns to skip */
-#ifdef POMD4C_CTRL_SEQ
-    const char*  ctrl_seq;                 /* Control sequence */
-#endif /* POMD4C_CTRL_SEQ */
     const char*  post_path;                /* Post-processor path */
     const char*  tmpdir;                   /* User TMPDIR */
     const char*  input_path;               /* The current input file */
@@ -638,12 +635,12 @@ still_in_def:
 #define USAGE_STR \
     "pomd4c "POMD4C_VERSION"\n" \
     "USAGE: %s [OPTIONS] FILE1 [FILE2...FILEN]\n" \
-    "\nOPTIONS:\n" \
-    " -h\tUsage info (this)\n" \
-    " -v\tVerbosity (more times == more verbose)\n" \
-    " -p\tPost-process output script (default: none)\n" \
-    " -e\tSpecify a postprocessor env parameter (multiple ok)\n" \
-    "   \t(e.g.: pomd4c -e 'my_key=my_value')\n" \
+    "OPTIONS:\n" \
+    " -h	Usage info (this)\n" \
+    " -v	Verbosity (more times == more verbose)\n" \
+    " -p	Post-process output script (default: none)\n" \
+    " -e	Specify a postprocessor env parameter (multiple ok)\n" \
+    "   	(e.g.: pomd4c -e 'my_key=my_value')\n" \
     "\n" \
     "POSTPROCESSING\n" \
     "\n" \
@@ -657,15 +654,22 @@ still_in_def:
     "\n" \
     "    $ pomd4c -p /path/to/my/script ./my_source.c\n" \
     "\n" \
-    "  The process receives two arguments, \"COMMENT\" and \"BODY\": they are\n" \
-    "  paths to temp files containing the comment data and the subsequent\n" \
-    "  C entity (if present). STDOUT and STDERR are left open (mind your\n" \
-    "  STDOUT if you're leveraging redirects!). Parameters and metadata\n" \
-    "  are provided through the env. C entities are NOT wrapped in code\n" \
-    "  fences.\n" \
+    "  When a file is first being processed, the post processing script\n" \
+    "  will be invoked once with no arguments. The name of the source\n" \
+    "  file being processed will be in the env var, POMD4C_SOURCE.\n" \
+    "  Afterwards, the process is called once for each doc comment, with\n" \
+    "  one or two arguments specified on the command line:\n" \
+    "\n" \
+    "    $1 — a path to a tmp file containing the doc comment\n" \
+    "    $2 — a path to a tmp file containing the corresponding\n" \
+    "         source code, if present.\n" \
+    "\n" \
+    "  STDOUT and STDERR are left open (mind your STDOUT if you're\n" \
+    "  leveraging redirects!). Parameters and metadata are provided\n" \
+    "  through the env. C entities are NOT wrapped in code fences.\n" \
     "\n" \
     "\n" \
-    "POSTPROCESS ENV\n" \
+    "PARAMETERS\n" \
     "\n" \
     "  pomd4c provides some limited metadata to postprocessing scripts, by\n" \
     "  way of env vars with a \"POMD4C_\" prefix, e.g.:\n" \
@@ -679,7 +683,7 @@ still_in_def:
     "  variables with a "PARAM_PREFIX" prefix, e.g.:\n" \
     "      $ pomd4c -p ./my-script.sh -e my_param=value ...\n" \
     "\n" \
-    "  Will set the env var "PARAM_PREFIX"MY_PARAM equal to \"value\"\n" \
+    "  Will set the env var "PARAM_PREFIX"_MY_PARAM equal to \"value\"\n" \
     "\n" \
     "\n" \
     "ENVIRONMENT\n" \
@@ -690,52 +694,6 @@ still_in_def:
     "    POMD4C_SKIP_COLS   Number of comment columns to skip   3\n" \
     "\n"
 
-#if 0
-    " -c\tSpecify a control sequence (default: unset)\n" \
-    "CONTROL SEQUENCES\n" \
-    "\n" \
-    "  Not implemented yet. It's just an option and this usage blurb, at\n" \
-    "  the moment. The gist is: allow the user to define some character\n" \
-    "  sequence that is used to move some comment data into the env, to\n" \
-    "  allow scripts to define their own commands, e.g.:\n" \
-    "\n" \
-    "    my_source.c comment body:\n" \
-    "      This is the text of some comment. You get the idea.\n" \
-    "\n" \
-    "      :param stuff: does whatever\n" \
-    "\n" \
-    "      etc\n" \
-    "\n" \
-    "      The control sequence part of it is on the next line:\n" \
-    "      ^e: my_param=yes\n" \
-    "\n" \
-    "    my-postproc-script.sh:\n" \
-    "      if [ \"x${POMD4C_MY_PARAM}\" == \"xyes\" ]; then\n" \
-    "          do_something_special()\n" \
-    "      fi\n" \
-    "\n" \
-    "    Invocation:\n" \
-    "      pomd4c -p my-postproc-script.sh -c '^e:' ./my-source.c\n" \
-    "\n" \
-    "  The string following the control sequence can be a key/value pair\n" \
-    "  or just a literal string. It's handled like this:\n" \
-    "\n" \
-    "   - Env names have to start with a [A-Z] and consist of [A-Z_0-9].\n" \
-    "     any characters outside of that range are converted to '_'.\n" \
-    "\n" \
-    "   - If there is a '=' character, the characters on the left side of\n" \
-    "     the first '=', transformed as above, are used as the env name — \n" \
-    "     with the prefix \""PARAM_PREFIX"\" prepended. Everything on the right\n" \
-    "     becomes the value.\n" \
-    "\n" \
-    "   - In any case, the whole line is also captured as a value and stored\n" \
-    "     in the newline-delmited env var \"POMD4C_PARAMETERS\".\n" \
-    "\n" \
-    "  Do with it what you will.\n" \
-    "\n" \
-    "\n" \
-
-#endif
 
 static void usage(const char* name) {
     fprintf(stderr, USAGE_STR, name);
@@ -830,11 +788,7 @@ static int configure_parser(void)
  */
 int main(int argc, char** argv)
 {
-#ifdef POMD4C_CTRL_SEQ
-# define POMD4C_OPTIONS "hvp:c:e:"
-#else
 # define POMD4C_OPTIONS "hvp:e:"
-#endif /* POMD4C_CTRL_SEQ */
 
     int ch;
     memset(&config, 0, sizeof(config));
@@ -851,11 +805,6 @@ int main(int argc, char** argv)
             case 'p':
                 config.post_path = optarg;
                 break;
-#ifdef POMD4C_CTRL_SEQ
-            case 'c':
-                config.ctrl_seq = optarg;
-                break;
-#endif /* POMD4C_CTRL_SEQ */
             case 'e':
                 add_env_param(optarg);
                 break;
