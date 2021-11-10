@@ -153,7 +153,7 @@
 
 /** Version number as a string literal. */
 #ifndef POMD4C_VERSION
-#define POMD4C_VERSION "0.9.0"
+#define POMD4C_VERSION "0.10.0"
 #endif /* POMD4C_VERSION */
 
 /** ## Types
