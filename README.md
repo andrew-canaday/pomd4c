@@ -25,6 +25,9 @@ gcc ./pomd4c.c -o ./pomd4c \
     && ./pomd4c ./pomd4c.c > ./API.md
 ```
 
+
+(A [`Makefile`](./Makefile) is included — `make help` for more info)
+
 <details><summary>:point_left: Example</summary>
 
 ### input.c
