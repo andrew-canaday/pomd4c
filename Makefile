@@ -52,11 +52,7 @@ pomd4c: pomd4c.c ## Build the pomd4c executable
 
 check: pomd4c ## Run a quick check of the parser
 	$(MKFILE_DIR)/pomd4c $(POMD4C_OPTS) \
-		$(MKFILE_DIR)/examples/postproc/example.h
-
-check-self: pomd4c # Run a quick check of the parser using the source
-	$(MKFILE_DIR)/pomd4c $(POMD4C_OPTS) \
-		$(SRCDIR)/*.h $(SRCDIR)/*.c
+		$(MKFILE_DIR)/pomd4c.c
 
 install: info pomd4c ## Install
 	$(INSTALL_PROGRAM) -v -d $(DESTDIR)

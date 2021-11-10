@@ -427,11 +427,9 @@ static void parser_emit(void)
                     config.post_path, config.post_path,
                     config.comment_path, source_path,
                     NULL);
-            if( r_val ) {
-                LOG_ERROR("Failed to launch post proc %s: %s",
-                        config.post_path, strerror(errno));
-                exit(1);
-            }
+            LOG_ERROR("Failed to launch post proc %s: %s",
+                    config.post_path, strerror(errno));
+            exit(1);
         }
 
         if( post_pid > 0 ) {
@@ -449,7 +447,9 @@ static void parser_emit(void)
 emit_bail:
     if( config.post_path ) {
         fclose(config.comment_out);
+        remove(config.comment_path);
         fclose(config.source_out);
+        remove(config.source_path);
     }
     LOG_ERROR("Failed to write docs: %s", strerror(errno));
     exit(1);
@@ -909,6 +909,26 @@ int main(int argc, char** argv)
         parser_reset();
 
         errno = 0;
+
+        /* Invoke the postproc script once with no args to notify we're
+         * starting a file:
+         */
+        pid_t post_pid = fork();
+        if( !post_pid ) {
+            LOG_DEBUG("Executing: %s (START FILE: %s)",
+                    config.post_path, config.abs_input_path);
+            setenv("POMD4C_SOURCE", config.abs_input_path, 1);
+            setenv("POMD4C_VERSION", POMD4C_VERSION, 1);
+            execlp(config.post_path, config.post_path, NULL);
+            LOG_ERROR("Failed to launch post proc %s: %s",
+                    config.post_path, strerror(errno));
+        } else {
+            while( (post_pid = waitpid(-1, 0, 0)) > 0 )
+            {
+                LOG_DEBUG("Waiting on process %i to complete", (int)post_pid);
+            }
+        }
+
         if( parse(buffer, source_stat.st_size) < 0 ) {
             LOG_ERROR("Parsing for %s failed at row %zu, column %zu",
                     config.input_path, parser.row, parser.col);
